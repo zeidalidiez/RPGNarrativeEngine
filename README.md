@@ -6,7 +6,7 @@ The editor will use Tauri 2. Electron is not and will not be part of this projec
 
 ## Current status
 
-The first complete playable path now works. A `.story` file is parsed and compiled into a serializable, platform-neutral instruction format; the headless runtime executes state changes, expressions, branches, calls, choices, effects, scene transitions, and endings; and the browser player renders the result with safe semantic DOM. `examples/showcase` contains a real branching story, **The Light at Brinewatch**, which is compiled in the browser and can be built as a static GitHub Pages site. The repository foundation, strict TypeScript toolchain, focused Linux CI, package policies, stable IDs, diagnostics, Lezer parser, normalized story/expression ASTs, and safe inline text are also implemented. The editor, project loader, save system, visual authoring UI, and packaged-game exporters remain to be built.
+The first complete playable path now works. A `.story` file is parsed and compiled into a serializable, platform-neutral instruction format; the headless runtime executes state changes, expressions, branches, calls, choices, effects, scene transitions, and endings; and the browser player renders the result with safe semantic DOM. `examples/showcase` contains a real branching story, **The Light at Brinewatch**, which is compiled in the browser and can be built as a static GitHub Pages site. `apps/playground` provides a creator-facing browser workspace for editing, opening, downloading, compiling, diagnosing, and playing `.story` source without a terminal. The repository foundation, strict TypeScript toolchain, focused Linux CI, package policies, stable IDs, diagnostics, Lezer parser, normalized story/expression ASTs, and safe inline text are also implemented. The project loader, save system, full desktop authoring workspaces, and packaged-game exporters remain to be built.
 
 The complete intended product is documented in:
 
@@ -42,6 +42,7 @@ pnpm test
 pnpm test:e2e
 pnpm build
 pnpm --filter @rpgnarrativeengine/showcase dev
+pnpm --filter @rpgnarrativeengine/playground dev
 pnpm build:reference
 pnpm policy
 pnpm size
@@ -53,7 +54,7 @@ pnpm run sbom
 
 ## Repository shape
 
-- `apps/` contains the editor and browser playground application boundaries.
+- `apps/` contains the working browser story playground and the desktop editor application boundary.
 - `packages/` contains narrowly owned engine, compiler, runtime, player, exporter, SDK, and tooling packages.
 - `modules/` contains opt-in first-party RPG systems.
 - `examples/showcase/` contains the playable public reference game and its static-site build.

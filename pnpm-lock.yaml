@@ -62,7 +62,14 @@ importers:
 
   apps/editor: {}
 
-  apps/playground: {}
+  apps/playground:
+    dependencies:
+      '@rpgnarrativeengine/compiler':
+        specifier: workspace:*
+        version: link:../../packages/compiler
+      '@rpgnarrativeengine/player':
+        specifier: workspace:*
+        version: link:../../packages/player
 
   examples/showcase:
     dependencies:

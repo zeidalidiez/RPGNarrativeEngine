@@ -12,6 +12,7 @@ The repository now has a runnable browser-game path in addition to its contracts
 - `@rpgnarrativeengine/runtime` is a deterministic, DOM-independent interpreter. It owns flat dotted-path narrative variables, strict expression evaluation, nested instruction frames, scene call continuations, conditional/choice execution, state mutation, effect dispatch, explicit and natural completion, restart, and a small player-facing view union. It uses an execution budget to stop non-yielding loops.
 - `@rpgnarrativeengine/player` mounts an accessible browser player with no framework dependency. It creates semantic DOM without `innerHTML`, renders the supported rich-text nodes, exposes native-button choices/continue/restart controls, focuses the active control, and reports runtime failures inside the player.
 - `examples/showcase/story/lighthouse.story` is a seven-scene reference story exercising dialogue, interpolation, state, choice conditions, branches, calls/returns, effects, transitions, and multiple endings. The Vite app compiles it from source in the browser and mounts the real player. Its production build uses relative asset URLs so the output can be served from a GitHub Pages project path.
+- `apps/playground` is a working creator-facing browser application. It edits plain `.story` source, persists it locally, imports and downloads story files, compiles on demand or with Ctrl/Cmd+Enter, mounts the production player for preview, reports scene count, and presents compiler issues as clickable line/column diagnostics that select the failing source range. It is a single-file scratchpad, not yet the canonical multi-file project editor.
 
 Build Stage 1 is implemented as a working repository foundation:
 
@@ -116,8 +117,8 @@ Ordinary generated build output belongs in `dist/`, `build/`, `coverage/`, `play
 
 Build outward from the working path rather than returning to contract-only work:
 
-1. Add the project manifest/loader so the compiler can build a creator project instead of a single source string.
-2. Put the compiler and player behind the browser playground UI with source editing, diagnostics, and live restart.
-3. Add runtime save snapshots and deterministic RNG, then expose save/load in the player.
-4. Build shared export orchestration for the static web target and wire it to both CLI and GUI entry points.
+1. Add the project manifest/loader so the compiler and playground can build a creator project instead of a single source string.
+2. Add runtime save snapshots and deterministic RNG, then expose save/load in the player.
+3. Build shared export orchestration for the static web target and wire it to both CLI and GUI entry points.
+4. Move the working playground surfaces into the Tauri editor shell with filesystem-backed project open/save and source conflict handling.
 5. Continue command schemas, static typing, formatting, localization, modules, and native Tauri targets as those working paths require them.

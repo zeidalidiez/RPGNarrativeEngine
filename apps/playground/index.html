@@ -3,10 +3,72 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RPG Narrative Engine Playground</title>
+    <meta
+      name="description"
+      content="Write and play RPG Narrative Engine stories directly in your browser."
+    />
+    <meta name="theme-color" content="#111318" />
+    <title>Story Playground · RPG Narrative Engine</title>
   </head>
   <body>
-    <div id="app"></div>
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">RNE</span>
+          <div>
+            <p>RPG Narrative Engine</p>
+            <h1>Story Playground</h1>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button id="open-button" class="button button-subtle" type="button">Open .story</button>
+          <button id="download-button" class="button button-subtle" type="button">Download</button>
+          <button id="run-button" class="button button-primary" type="button">
+            <span aria-hidden="true">▶</span> Run story
+          </button>
+          <input id="file-input" type="file" accept=".story,text/plain" hidden />
+        </div>
+      </header>
+
+      <section class="workspace" aria-label="Story authoring playground">
+        <section class="editor-pane" aria-labelledby="source-heading">
+          <div class="pane-header">
+            <div>
+              <p class="pane-kicker">Source</p>
+              <h2 id="source-heading">main.story</h2>
+            </div>
+            <button id="reset-button" class="text-button" type="button">Reset example</button>
+          </div>
+          <div class="editor-wrap">
+            <label class="sr-only" for="story-source">Story source</label>
+            <textarea
+              id="story-source"
+              spellcheck="false"
+              autocapitalize="off"
+              autocomplete="off"
+              aria-describedby="editor-hint"
+            ></textarea>
+          </div>
+          <div class="editor-footer">
+            <p id="editor-hint"><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> to run</p>
+            <p id="source-stats" aria-live="polite"></p>
+          </div>
+        </section>
+
+        <section class="preview-pane" aria-labelledby="preview-heading">
+          <div class="pane-header preview-header">
+            <div>
+              <p class="pane-kicker">Preview</p>
+              <h2 id="preview-heading">Player</h2>
+            </div>
+            <p id="compile-status" class="compile-status" aria-live="polite"></p>
+          </div>
+          <div id="diagnostics" class="diagnostics" aria-live="assertive"></div>
+          <div id="player" class="player-mount"></div>
+        </section>
+      </section>
+    </main>
+    <noscript>The story playground requires JavaScript.</noscript>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>
