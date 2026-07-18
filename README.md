@@ -6,7 +6,7 @@ The editor will use Tauri 2. Electron is not and will not be part of this projec
 
 ## Current status
 
-The repository has its foundation and the first executable contracts. The workspace, strict TypeScript toolchain, focused Linux CI, package boundaries, policy checks, build reporting, application shells, and first-party module boundaries exist. Stable IDs/namespaces, UTF-16 source spans, diagnostics, safe source-edit descriptions, TypeScript APIs, JSON Schemas, and valid/invalid fixtures are implemented. The story language, compiler, runtime, editor UI, player, and public showcase are not implemented yet.
+The repository has its foundation and the first executable contracts. The workspace, strict TypeScript toolchain, focused Linux CI, package boundaries, policy checks, build reporting, application shells, and first-party module boundaries exist. Stable IDs/namespaces, semantic versions and compatibility intervals, UTF-16 source spans, diagnostics, safe source-edit descriptions, TypeScript APIs, JSON Schemas, and valid/invalid fixtures are implemented. The story language, compiler, runtime, editor UI, player, and public showcase are not implemented yet.
 
 The complete intended product is documented in:
 

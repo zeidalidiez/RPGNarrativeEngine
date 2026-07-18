@@ -22,6 +22,25 @@ export {
   type SourceTextEdit,
 } from './diagnostic.js';
 export {
+  SEMANTIC_VERSION_PATTERN_SOURCE,
+  InvalidSemanticVersionError,
+  InvalidSemanticVersionRangeError,
+  compareSemanticVersions,
+  compatibleSemanticVersionRange,
+  createSemanticVersionRange,
+  haveEqualSemanticVersionPrecedence,
+  isPrereleaseSemanticVersion,
+  isSemanticVersion,
+  parseSemanticVersion,
+  satisfiesSemanticVersionRange,
+  semanticVersionParts,
+  type SemanticCompatibilityPolicy,
+  type SemanticVersion,
+  type SemanticVersionParts,
+  type SemanticVersionRange,
+  type SemanticVersionRangeInput,
+} from './semantic-version.js';
+export {
   RESERVED_ID_NAMESPACES,
   STABLE_ID_MAX_LENGTH,
   STABLE_ID_PATTERN_SOURCE,

@@ -23,7 +23,8 @@ Build Stage 2 has begun in `@rpgnarrativeengine/contracts`:
 - C-01 stable ID grammar, branded ID kinds, reserved first-party namespace enforcement, editor-only ID suggestions, namespace ownership checks, and deterministic rename migration validation/resolution.
 - Half-open source positions/spans using zero-based UTF-16 offsets and one-based lines/columns with fixed LF/CRLF semantics.
 - C-04 diagnostic code ranges, severities, source/related locations, deterministic serialization, release severity policy, and conflict-checked expected-text source edits.
-- Published stable-ID and diagnostic JSON Schemas plus valid/invalid fixtures checked with Ajv 2020.
+- Exact SemVer 2.0.0 parsing and precedence without JavaScript integer precision loss, structured compatibility intervals, prerelease policy, and conventional stable/pre-1.0 upper-bound derivation.
+- Published stable-ID, semantic-version, and diagnostic JSON Schemas plus valid/invalid fixtures checked with Ajv 2020.
 
 There is deliberately no story language, compiler, IR, runtime, player, RPG behavior, editor UI, native shell, exporter, or playable showcase yet. Other empty package entry points establish buildable boundaries only and must never be described as product features.
 
@@ -52,7 +53,7 @@ Dependencies are exact, not range-prefixed. Update them intentionally and commit
 
 `packages/` owns engine-level concepts:
 
-- `contracts`: public primitives shared by multiple packages. It currently owns stable IDs, source locations, diagnostics, safe text-edit descriptions, their schemas, and their fixtures.
+- `contracts`: public primitives shared by multiple packages. It currently owns stable IDs, semantic versions and compatibility intervals, source locations, diagnostics, safe text-edit descriptions, their schemas, and their fixtures.
 - `language`: grammar, CST/AST, formatting, and language services.
 - `project`: project manifests, lockfiles, loaders, migrations, and paths.
 - `ir`: versioned compiler output schemas/readers/writers.
@@ -102,9 +103,8 @@ Generated output belongs in `dist/`, `build/`, `coverage/`, `playwright-report/`
 
 Continue Build Stage 2 in `packages/contracts` and `docs/contracts`:
 
-1. Add semantic-version compatibility primitives.
-2. Define the complete C-02 story grammar and C-03 expression semantics as executable fixtures.
-3. Add project manifest, feature, path, lockfile, and asset contracts.
-4. Continue through the remaining contract corpus before dependent runtime/editor behavior.
+1. Define the complete C-02 story grammar and C-03 expression semantics as executable fixtures.
+2. Add project manifest, feature, path, lockfile, and asset contracts.
+3. Continue through the remaining contract corpus before dependent runtime/editor behavior.
 
 Do not jump into editor screens or game mechanics before their contracts exist. This is a dependency constraint, not a request to reduce the project's scope.

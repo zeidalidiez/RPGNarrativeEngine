@@ -1,0 +1,30 @@
+[
+  {
+    "minimum": "1.2.3",
+    "policy": "semver",
+    "before": "2.0.0",
+    "accepts": ["1.2.3", "1.9.9", "1.9.9+portable"],
+    "rejects": ["1.2.2", "1.5.0-beta.1", "2.0.0"]
+  },
+  {
+    "minimum": "0.2.3",
+    "policy": "semver",
+    "before": "0.3.0",
+    "accepts": ["0.2.3", "0.2.99"],
+    "rejects": ["0.2.2", "0.3.0", "1.0.0"]
+  },
+  {
+    "minimum": "0.0.4",
+    "policy": "semver",
+    "before": "0.0.5",
+    "accepts": ["0.0.4", "0.0.4+rebuilt"],
+    "rejects": ["0.0.3", "0.0.5"]
+  },
+  {
+    "minimum": "2.0.0-beta.1",
+    "policy": "same-major",
+    "before": "3.0.0-0",
+    "accepts": ["2.0.0-beta.1", "2.0.0-beta.2", "2.0.0", "2.9.0"],
+    "rejects": ["2.0.0-beta.0", "3.0.0-alpha", "3.0.0"]
+  }
+]

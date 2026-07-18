@@ -87,6 +87,7 @@ These defaults remove the open-ended alternatives in the research specification.
 | Desktop shell | Tauri 2 only. Electron packages and Electron-specific code are forbidden by repository policy. |
 | Audio | An engine-owned audio port with a native web adapter: `HTMLMediaElement` for streamed long tracks and Web Audio for mixing and short effects. Howler is not the default dependency. |
 | Public validation | JSON Schema 2020-12 validated with a pinned Ajv release. Generated or hand-authored TypeScript types must have schema/type conformance tests. |
+| Version compatibility | Exact versions use Semantic Versioning 2.0.0. Internal ranges have an inclusive minimum, exclusive upper bound, and explicit prerelease policy. The default compatibility line is the same major after 1.0, same minor before 1.0, and same patch at 0.0; build metadata never affects precedence. |
 | RNG | A versioned `xoshiro128**` implementation using unsigned 32-bit operations, four-word serializable state, published test vectors, and independently derived named streams. Changing the algorithm is a compatibility event. |
 | RPG RNG streams | At minimum: `story`, `world`, `encounters`, `combat`, and one stream per deterministic plugin namespace. Cosmetic effects cannot consume mechanical streams. |
 | Combat timing | Collect and review one intent for every able ally, then select enemy intents and resolve all intents by deterministic initiative. |

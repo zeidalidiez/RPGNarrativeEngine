@@ -6,3 +6,4 @@ Implemented contracts:
 
 - [C-01: Identifiers and namespaces](./identifiers.md)
 - [C-04: Source locations and diagnostics](./diagnostics.md)
+- [Semantic versions and compatibility](./semantic-versions.md)
