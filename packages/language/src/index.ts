@@ -60,3 +60,16 @@ export {
   type SyntaxIssueCode,
   type SyntaxParseResult,
 } from './syntax-parser.js';
+export {
+  parseStoryAst,
+  type StoryAstParseResult,
+  type StoryChoiceAst,
+  type StoryCommandAst,
+  type StoryConditionalAst,
+  type StoryDocumentAst,
+  type StoryItemAst,
+  type StorySceneAst,
+  type StoryTextAst,
+  type StoryTextLineAst,
+  type StoryTriviaAst,
+} from './story-ast.js';
