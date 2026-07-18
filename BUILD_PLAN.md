@@ -1254,6 +1254,25 @@ The following details are fixed to prevent divergent implementations.
 - Aesthetic warnings such as unusually dense ornament or a nonessential shadow/blur preference may be waived with a recorded reason.
 - An accessible alternate mode does not excuse an inoperable default mode.
 
+### 11.8 Story lexical and structural semantics
+
+- UTF-8 `.story` files accept an optional initial BOM, LF or CRLF, and optional final newline; lone CR is diagnosed and formatted output omits the BOM.
+- Structural indentation is exact two-space levels. Tabs are invalid in indentation and unquoted text. Indentation only nests conditional/long-choice bodies and one-level narration/dialogue continuations.
+- `//` begins a comment outside quotes unless escaped. At the current indentation `::`, `@`, and `*` are structural; a leading backslash forces narration and removes one escape character.
+- One narration/dialogue logical line is one runtime beat. A physical line exactly one level deeper continues that beat with an explicit line break.
+- Variable/function paths use lowercase letter/underscore-led dot segments and exclude hyphens, keeping subtraction lexically unambiguous from stable IDs.
+- Numeric literal cores are unsigned decimal/exponent forms without leading zeroes; negative values use unary minus. Durations are integer milliseconds or seconds with at most three fractional digits and lower to exact integer milliseconds.
+- Content ID suffixes are the final non-comment element. Choice suffix order is arrow target, condition, then content ID. Long choices and every reachable scene path terminate explicitly; source order never implies scene fallthrough.
+- Safe markup is emphasis, strong text, explicit continuation breaks, interpolation, `[lang=...]...[/lang]`, and `[pronounce="..."]...[/pronounce]`. Raw HTML, arbitrary tags, links, images, CSS, and author ARIA are invalid.
+
+### 11.9 Expression semantics
+
+- Precedence from low to high is `||`, `&&`, equality, numeric comparison, addition/subtraction, multiplication/division/modulo, unary `!`/`-`, then calls/parentheses. Binary operators are left-associative; unary operators are right-associative; arguments evaluate left to right.
+- The only value types are boolean, finite IEEE-754 number, and string. Equality never coerces. Ordering is numeric only. `+` accepts number/number or string/string; every other arithmetic operator is numeric only.
+- Logical operators require booleans and short-circuit. Division/modulo by either zero is an error. Non-finite inputs/results are errors and negative zero normalizes to positive zero before persistence.
+- Pure v1 functions are `min`, `max`, `clamp`, `round`, and Unicode-code-point `length`. Seeded `random()` returns `[0, 1)` and `random(minimum, before)` returns `[minimum, before)` using only the serialized story RNG stream; neither can execute until C-08 vectors exist.
+- Enabled module namespace roots are read-only. Plugins publish parameter/result types and pure/seeded determinism metadata before their functions enter resolution.
+
 ---
 
 ## 12. Verification strategy

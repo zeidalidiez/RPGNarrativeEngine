@@ -1,0 +1,22 @@
+{
+  "binary": [
+    { "operator": "+", "left": 2, "right": 3, "result": 5 },
+    { "operator": "+", "left": "rain", "right": "fall", "result": "rainfall" },
+    { "operator": "-", "left": 7, "right": 2, "result": 5 },
+    { "operator": "*", "left": 3, "right": 4, "result": 12 },
+    { "operator": "/", "left": 7, "right": 2, "result": 3.5 },
+    { "operator": "%", "left": -7, "right": 3, "result": -1 },
+    { "operator": "==", "left": "mara", "right": "mara", "result": true },
+    { "operator": "!=", "left": false, "right": true, "result": true },
+    { "operator": "<", "left": 2, "right": 3, "result": true },
+    { "operator": ">=", "left": 3, "right": 3, "result": true }
+  ],
+  "functions": [
+    { "name": "min", "arguments": [3, -1, 2], "result": -1 },
+    { "name": "max", "arguments": [3, -1, 2], "result": 3 },
+    { "name": "clamp", "arguments": [8, 0, 5], "result": 5 },
+    { "name": "round", "arguments": [1.5], "result": 2 },
+    { "name": "round", "arguments": [-1.5], "result": -1 },
+    { "name": "length", "arguments": ["😀a"], "result": 2 }
+  ]
+}

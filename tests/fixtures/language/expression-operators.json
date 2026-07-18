@@ -1,0 +1,17 @@
+[
+  { "operator": "||", "precedence": 1, "associativity": "left", "arity": 2 },
+  { "operator": "&&", "precedence": 2, "associativity": "left", "arity": 2 },
+  { "operator": "==", "precedence": 3, "associativity": "left", "arity": 2 },
+  { "operator": "!=", "precedence": 3, "associativity": "left", "arity": 2 },
+  { "operator": "<", "precedence": 4, "associativity": "left", "arity": 2 },
+  { "operator": "<=", "precedence": 4, "associativity": "left", "arity": 2 },
+  { "operator": ">", "precedence": 4, "associativity": "left", "arity": 2 },
+  { "operator": ">=", "precedence": 4, "associativity": "left", "arity": 2 },
+  { "operator": "+", "precedence": 5, "associativity": "left", "arity": 2 },
+  { "operator": "-", "precedence": 5, "associativity": "left", "arity": 2 },
+  { "operator": "*", "precedence": 6, "associativity": "left", "arity": 2 },
+  { "operator": "/", "precedence": 6, "associativity": "left", "arity": 2 },
+  { "operator": "%", "precedence": 6, "associativity": "left", "arity": 2 },
+  { "operator": "!", "precedence": 7, "associativity": "right", "arity": 1 },
+  { "operator": "-", "precedence": 7, "associativity": "right", "arity": 1 }
+]

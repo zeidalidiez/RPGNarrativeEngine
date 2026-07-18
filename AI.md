@@ -18,15 +18,17 @@ Build Stage 1 is implemented as a working repository foundation:
 - Size, dependency-license, and CycloneDX 1.6 inventory commands write generated reports beneath `build/reports/`.
 - Unit fixtures prove cycle detection and Electron dependency rejection.
 
-Build Stage 2 has begun in `@rpgnarrativeengine/contracts`:
+Build Stage 2 has begun in `@rpgnarrativeengine/contracts` and `@rpgnarrativeengine/language`:
 
 - C-01 stable ID grammar, branded ID kinds, reserved first-party namespace enforcement, editor-only ID suggestions, namespace ownership checks, and deterministic rename migration validation/resolution.
 - Half-open source positions/spans using zero-based UTF-16 offsets and one-based lines/columns with fixed LF/CRLF semantics.
 - C-04 diagnostic code ranges, severities, source/related locations, deterministic serialization, release severity policy, and conflict-checked expected-text source edits.
 - Exact SemVer 2.0.0 parsing and precedence without JavaScript integer precision loss, structured compatibility intervals, prerelease policy, and conventional stable/pre-1.0 upper-bound derivation.
 - Published stable-ID, semantic-version, and diagnostic JSON Schemas plus valid/invalid fixtures checked with Ajv 2020.
+- C-02 syntax is fixed in `docs/contracts/story-language.md` and Build Plan sections 11.8-11.9. `@rpgnarrativeengine/language` implements variable-path, finite-number, exact-duration, and quoted-string lexical primitives; valid multiline/complete sources and a malformed recovery corpus are committed. The Lezer parser/CST/AST/formatter do not exist yet.
+- C-03 publishes executable operator precedence, strict typed arithmetic/equality/short-circuit behavior, pure standard functions, module namespace roots, and seeded-random metadata. Random execution remains intentionally absent until C-08 vectors define it.
 
-There is deliberately no story language, compiler, IR, runtime, player, RPG behavior, editor UI, native shell, exporter, or playable showcase yet. Other empty package entry points establish buildable boundaries only and must never be described as product features.
+There is deliberately no story parser, compiler, IR, runtime, player, RPG behavior, editor UI, native shell, exporter, or playable showcase yet. Other empty package entry points establish buildable boundaries only and must never be described as product features.
 
 ## Canonical documents
 
@@ -54,7 +56,7 @@ Dependencies are exact, not range-prefixed. Update them intentionally and commit
 `packages/` owns engine-level concepts:
 
 - `contracts`: public primitives shared by multiple packages. It currently owns stable IDs, semantic versions and compatibility intervals, source locations, diagnostics, safe text-edit descriptions, their schemas, and their fixtures.
-- `language`: grammar, CST/AST, formatting, and language services.
+- `language`: owns the story/expression grammar, CST/AST, formatting, and language services. It currently implements only lexical contract helpers and executable expression primitives/metadata; parsing and language services remain pending.
 - `project`: project manifests, lockfiles, loaders, migrations, and paths.
 - `ir`: versioned compiler output schemas/readers/writers.
 - `compiler`: resolution, typing, analysis, and lowering.
@@ -103,8 +105,9 @@ Generated output belongs in `dist/`, `build/`, `coverage/`, `playwright-report/`
 
 Continue Build Stage 2 in `packages/contracts` and `docs/contracts`:
 
-1. Define the complete C-02 story grammar and C-03 expression semantics as executable fixtures.
-2. Add project manifest, feature, path, lockfile, and asset contracts.
-3. Continue through the remaining contract corpus before dependent runtime/editor behavior.
+1. Implement the shared Lezer C-02 grammar, recovery tree, normalized AST/source ranges, and idempotent formatter against the committed corpus.
+2. Implement the C-03 expression parser, resolver, and type checker using the fixed precedence and semantics.
+3. Add project manifest, feature, path, lockfile, and asset contracts.
+4. Continue through the remaining contract corpus before dependent runtime/editor behavior.
 
 Do not jump into editor screens or game mechanics before their contracts exist. This is a dependency constraint, not a request to reduce the project's scope.
