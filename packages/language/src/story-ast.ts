@@ -5,9 +5,15 @@ import {
   type ContentId,
   type SceneId,
   type SourceSpan,
+  type VariantId,
 } from '@rpgnarrativeengine/contracts';
 
-import { parseExpressionAst, type ExpressionAst } from './expression-ast.js';
+import { parseEmbeddedExpressionAst, type ExpressionAst } from './expression-ast.js';
+import {
+  normalizeStoryInline,
+  type StoryInlineAst,
+  type StoryInlineSourceSegment,
+} from './inline-text.js';
 import { createSourceSpanMap, type SourceSpanMap } from './source-span-map.js';
 import { parseStorySyntax, type SyntaxIssue } from './syntax-parser.js';
 
@@ -24,15 +30,27 @@ export interface StoryTriviaAst extends StoryAstBase {
 export interface StoryTextLineAst {
   readonly raw: string;
   readonly text: string;
+  readonly contentSpan: SourceSpan;
   readonly span: SourceSpan;
+}
+
+export interface StoryDialogueSpeakerAst {
+  /** Unresolved configured alias or stable voice ID exactly as authored. */
+  readonly reference: string;
+  readonly referenceSpan: SourceSpan;
+  readonly variant: VariantId | null;
+  readonly variantSpan: SourceSpan | null;
 }
 
 export interface StoryTextAst extends StoryAstBase {
   readonly kind: 'text';
+  readonly mode: 'dialogue' | 'narration';
+  readonly speaker: StoryDialogueSpeakerAst | null;
   readonly escapedLeadingMarker: boolean;
   readonly contentId: ContentId | null;
   readonly contentIdSpan: SourceSpan | null;
   readonly lines: readonly StoryTextLineAst[];
+  readonly inline: readonly StoryInlineAst[];
 }
 
 export interface StoryCommandAst extends StoryAstBase {
@@ -111,6 +129,12 @@ interface ChoiceSuffixes {
   readonly conditionSpan: SourceSpan | null;
   readonly contentId: ContentId | null;
   readonly contentIdSpan: SourceSpan | null;
+  readonly valid: boolean;
+}
+
+interface DialogueHead {
+  readonly speaker: StoryDialogueSpeakerAst | null;
+  readonly bodyRange: SourceRange;
   readonly valid: boolean;
 }
 
@@ -247,74 +271,16 @@ function parseContentId(context: NormalizationContext, range: SourceRange): Cont
   }
 }
 
-function rebasedSpan(map: SourceSpanMap, span: SourceSpan, baseOffset: number): SourceSpan {
-  return map.span(baseOffset + span.start.offset, baseOffset + span.end.offset);
-}
-
-function rebaseExpression(
-  expression: ExpressionAst,
-  map: SourceSpanMap,
-  baseOffset: number,
-): ExpressionAst {
-  const span = rebasedSpan(map, expression.span, baseOffset);
-  switch (expression.kind) {
-    case 'boolean-literal':
-      return Object.freeze({ ...expression, span });
-    case 'number-literal':
-      return Object.freeze({ ...expression, span });
-    case 'string-literal':
-      return Object.freeze({ ...expression, span });
-    case 'variable':
-      return Object.freeze({ ...expression, span });
-    case 'call':
-      return Object.freeze({
-        ...expression,
-        arguments: Object.freeze(
-          expression.arguments.map((argument) => rebaseExpression(argument, map, baseOffset)),
-        ),
-        calleeSpan: rebasedSpan(map, expression.calleeSpan, baseOffset),
-        span,
-      });
-    case 'unary':
-      return Object.freeze({
-        ...expression,
-        operand: rebaseExpression(expression.operand, map, baseOffset),
-        span,
-      });
-    case 'binary':
-      return Object.freeze({
-        ...expression,
-        left: rebaseExpression(expression.left, map, baseOffset),
-        right: rebaseExpression(expression.right, map, baseOffset),
-        span,
-      });
-    case 'group':
-      return Object.freeze({
-        ...expression,
-        expression: rebaseExpression(expression.expression, map, baseOffset),
-        span,
-      });
-  }
-}
-
 function parseEmbeddedExpression(
   context: NormalizationContext,
   range: SourceRange,
 ): ExpressionAst | null {
   const source = context.source.slice(range.from, range.to);
-  const result = parseExpressionAst(source);
+  const result = parseEmbeddedExpressionAst(source, context.map, range.from);
   for (const current of result.issues) {
-    context.issues.push(
-      Object.freeze({
-        ...current,
-        from: range.from + current.from,
-        to: range.from + current.to,
-      }),
-    );
+    context.issues.push(current);
   }
-  return result.expression === null
-    ? null
-    : rebaseExpression(result.expression, context.map, range.from);
+  return result.expression;
 }
 
 function normalizeTrivia(context: NormalizationContext, node: SyntaxNode): StoryTriviaAst {
@@ -340,6 +306,146 @@ function decodeLeadingTextMarker(raw: string): {
   return Object.freeze({ escaped: false, text: raw });
 }
 
+function findDialogueDelimiter(source: string, range: SourceRange): number {
+  let escaped = false;
+  for (let offset = range.from; offset < range.to; offset += 1) {
+    const character = source[offset];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (
+      character === ':' &&
+      (source.charCodeAt(offset + 1) === 32 || source.charCodeAt(offset + 1) === 9)
+    ) {
+      return offset;
+    }
+  }
+  return -1;
+}
+
+function parseDialogueVariant(context: NormalizationContext, range: SourceRange): VariantId | null {
+  const raw = context.source.slice(range.from, range.to);
+  try {
+    return parseStableId<'variant'>(raw);
+  } catch (error) {
+    issue(
+      context,
+      error instanceof Error ? error.message : 'The dialogue variant ID is invalid.',
+      range.from,
+      range.to,
+    );
+    return null;
+  }
+}
+
+function parseDialogueHead(
+  context: NormalizationContext,
+  range: SourceRange,
+  forcedNarration: boolean,
+): DialogueHead {
+  if (forcedNarration) {
+    return Object.freeze({ speaker: null, bodyRange: range, valid: true });
+  }
+  const delimiter = findDialogueDelimiter(context.source, range);
+  if (delimiter === -1) {
+    return Object.freeze({ speaker: null, bodyRange: range, valid: true });
+  }
+
+  let referenceRange = trimHorizontal(context.source, range.from, delimiter);
+  let variant: VariantId | null = null;
+  let variantSpan: SourceSpan | null = null;
+  let valid = true;
+  if (context.source[referenceRange.to - 1] === ']') {
+    const opening = context.source.lastIndexOf('[', referenceRange.to - 1);
+    if (opening < referenceRange.from) {
+      issue(
+        context,
+        'A dialogue variant closing bracket has no matching opening bracket.',
+        referenceRange.from,
+        referenceRange.to,
+      );
+      valid = false;
+    } else {
+      const untrimmedVariantRange = Object.freeze({
+        from: opening + 1,
+        to: referenceRange.to - 1,
+      });
+      const variantRange = trimHorizontal(
+        context.source,
+        untrimmedVariantRange.from,
+        untrimmedVariantRange.to,
+      );
+      if (
+        variantRange.from !== untrimmedVariantRange.from ||
+        variantRange.to !== untrimmedVariantRange.to
+      ) {
+        issue(
+          context,
+          'Dialogue variant brackets cannot contain surrounding whitespace.',
+          untrimmedVariantRange.from,
+          untrimmedVariantRange.to,
+        );
+        valid = false;
+      }
+      variant = parseDialogueVariant(context, variantRange);
+      variantSpan = context.map.span(variantRange.from, variantRange.to);
+      valid &&= variant !== null;
+      referenceRange = trimHorizontal(context.source, referenceRange.from, opening);
+    }
+  } else {
+    const prefix = context.source.slice(referenceRange.from, referenceRange.to);
+    if (prefix.includes('[') || prefix.includes(']')) {
+      issue(
+        context,
+        'A dialogue variant must use a complete [variant-id] suffix before the colon.',
+        referenceRange.from,
+        referenceRange.to,
+      );
+      valid = false;
+    }
+  }
+  const referenceSource = context.source.slice(referenceRange.from, referenceRange.to);
+  if (referenceSource.includes('[') || referenceSource.includes(']')) {
+    issue(
+      context,
+      'Dialogue accepts at most one final [variant-id] suffix before the colon.',
+      referenceRange.from,
+      referenceRange.to,
+    );
+    valid = false;
+  }
+  if (referenceRange.from === referenceRange.to) {
+    issue(
+      context,
+      'Dialogue requires a configured speaker alias or stable voice ID before the colon.',
+      range.from,
+      delimiter,
+    );
+    valid = false;
+  }
+
+  const bodyRange = trimHorizontal(context.source, delimiter + 1, range.to);
+  if (bodyRange.from === bodyRange.to) {
+    issue(context, 'Dialogue text cannot be empty.', delimiter + 1, range.to);
+    valid = false;
+  }
+  return Object.freeze({
+    speaker: Object.freeze({
+      reference: context.source.slice(referenceRange.from, referenceRange.to),
+      referenceSpan: context.map.span(referenceRange.from, referenceRange.to),
+      variant,
+      variantSpan,
+    }),
+    bodyRange,
+    valid,
+  });
+}
+
 function normalizeText(context: NormalizationContext, node: SyntaxNode): StoryTextAst | null {
   const lineNodes: SyntaxNode[] = [];
   const firstLine = node.getChild('TextLine');
@@ -357,6 +463,7 @@ function normalizeText(context: NormalizationContext, node: SyntaxNode): StoryTe
   let contentIdSpan: SourceSpan | null = null;
   let valid = true;
   const lines: StoryTextLineAst[] = [];
+  const contentRanges: SourceRange[] = [];
   for (let index = 0; index < lineNodes.length; index += 1) {
     const lineNode = lineNodes[index];
     if (lineNode === undefined) {
@@ -390,10 +497,12 @@ function normalizeText(context: NormalizationContext, node: SyntaxNode): StoryTe
     const decoded =
       index === 0 ? decodeLeadingTextMarker(content) : { escaped: false, text: content };
     escapedLeadingMarker ||= decoded.escaped;
+    contentRanges.push(contentRange);
     lines.push(
       Object.freeze({
         raw,
         text: decoded.text,
+        contentSpan: context.map.span(contentRange.from, contentRange.to),
         span: context.map.span(lineNode.from, lineNode.to),
       }),
     );
@@ -401,12 +510,28 @@ function normalizeText(context: NormalizationContext, node: SyntaxNode): StoryTe
   if (!valid) {
     return null;
   }
+  const firstContentRange = contentRanges[0];
+  if (firstContentRange === undefined) {
+    throw new Error('Expected normalized text to contain a content range.');
+  }
+  const dialogue = parseDialogueHead(context, firstContentRange, escapedLeadingMarker);
+  const inlineSegments: StoryInlineSourceSegment[] = contentRanges.map((range, index) =>
+    Object.freeze(index === 0 ? dialogue.bodyRange : range),
+  );
+  const inline = normalizeStoryInline(context.source, inlineSegments, context.map);
+  context.issues.push(...inline.issues);
+  if (!dialogue.valid || inline.issues.length > 0) {
+    return null;
+  }
   return Object.freeze({
     kind: 'text',
+    mode: dialogue.speaker === null ? 'narration' : 'dialogue',
+    speaker: dialogue.speaker,
     escapedLeadingMarker,
     contentId,
     contentIdSpan,
     lines: Object.freeze(lines),
+    inline: inline.nodes,
     span: context.map.span(node.from, node.to),
   });
 }

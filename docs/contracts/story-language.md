@@ -1,6 +1,6 @@
 # C-02: Story grammar contract
 
-Status: Syntax, lexical primitives, fixtures, recoverable Lezer CST, and structural AST implemented; safe-markup/dialogue and command normalization plus formatter pending
+Status: Syntax, lexical primitives, fixtures, recoverable Lezer CST, and story/dialogue/safe-inline AST implemented; command normalization and formatter pending
 
 This document is normative for `.story` source. The parser and editor grammar must accept exactly this surface and must not create a second, more permissive release grammar.
 
@@ -146,4 +146,4 @@ Committed corpus:
 - `tests/fixtures/language/multiline.story`: continuations, escapes, interpolation, and safe markup.
 - `tests/fixtures/language/malformed.story`: recovery targets for headers, indentation, blocks, dialogue, choices, durations, and endings.
 
-The generated Lezer tree, source-ranged syntax issues, structural AST, and recovery tests consume these fixtures now. C-02 is not complete in code until inline text/markup and command normalization plus formatter idempotence tests consume the same corpus.
+The generated Lezer tree, source-ranged syntax issues, story/dialogue/safe-inline AST, and recovery tests consume these fixtures now. C-02 is not complete in code until command normalization and formatter idempotence tests consume the same corpus.

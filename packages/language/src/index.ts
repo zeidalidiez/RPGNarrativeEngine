@@ -51,6 +51,16 @@ export {
   type VariablePath,
 } from './lexical-contract.js';
 export {
+  type StoryInlineAst,
+  type StoryInlineEmphasisAst,
+  type StoryInlineInterpolationAst,
+  type StoryInlineLanguageAst,
+  type StoryInlineLineBreakAst,
+  type StoryInlinePronunciationAst,
+  type StoryInlineStrongAst,
+  type StoryInlineTextAst,
+} from './inline-text.js';
+export {
   expressionParser,
   parseExpressionSyntax,
   parseStorySyntax,
@@ -66,6 +76,7 @@ export {
   type StoryChoiceAst,
   type StoryCommandAst,
   type StoryConditionalAst,
+  type StoryDialogueSpeakerAst,
   type StoryDocumentAst,
   type StoryItemAst,
   type StorySceneAst,

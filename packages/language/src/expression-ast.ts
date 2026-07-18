@@ -329,6 +329,83 @@ function combinedIssues(
   return Object.freeze(issues);
 }
 
+function rebasedSpan(map: SourceSpanMap, span: SourceSpan, baseOffset: number): SourceSpan {
+  return map.span(baseOffset + span.start.offset, baseOffset + span.end.offset);
+}
+
+function rebaseExpression(
+  expression: ExpressionAst,
+  map: SourceSpanMap,
+  baseOffset: number,
+): ExpressionAst {
+  const span = rebasedSpan(map, expression.span, baseOffset);
+  switch (expression.kind) {
+    case 'boolean-literal':
+    case 'number-literal':
+    case 'string-literal':
+    case 'variable':
+      return Object.freeze({ ...expression, span });
+    case 'call':
+      return Object.freeze({
+        ...expression,
+        arguments: Object.freeze(
+          expression.arguments.map((argument) => rebaseExpression(argument, map, baseOffset)),
+        ),
+        calleeSpan: rebasedSpan(map, expression.calleeSpan, baseOffset),
+        span,
+      });
+    case 'unary':
+      return Object.freeze({
+        ...expression,
+        operand: rebaseExpression(expression.operand, map, baseOffset),
+        span,
+      });
+    case 'binary':
+      return Object.freeze({
+        ...expression,
+        left: rebaseExpression(expression.left, map, baseOffset),
+        right: rebaseExpression(expression.right, map, baseOffset),
+        span,
+      });
+    case 'group':
+      return Object.freeze({
+        ...expression,
+        expression: rebaseExpression(expression.expression, map, baseOffset),
+        span,
+      });
+  }
+}
+
+/** Internal adapter for expressions sliced from a larger story source. */
+export function parseEmbeddedExpressionAst(
+  source: string,
+  map: SourceSpanMap,
+  baseOffset: number,
+): ExpressionAstParseResult {
+  if (
+    !Number.isSafeInteger(baseOffset) ||
+    baseOffset < 0 ||
+    baseOffset + source.length > map.sourceLength
+  ) {
+    throw new RangeError('Embedded expression range falls outside its source document.');
+  }
+  const result = parseExpressionAst(source);
+  const issues = Object.freeze(
+    result.issues.map((current) =>
+      Object.freeze({
+        ...current,
+        from: baseOffset + current.from,
+        to: baseOffset + current.to,
+      }),
+    ),
+  );
+  return Object.freeze({
+    expression:
+      result.expression === null ? null : rebaseExpression(result.expression, map, baseOffset),
+    issues,
+  });
+}
+
 /** Parse and detach an expression from Lezer's concrete tree into the stable public AST. */
 export function parseExpressionAst(source: string): ExpressionAstParseResult {
   const syntax = parseExpressionSyntax(source);
