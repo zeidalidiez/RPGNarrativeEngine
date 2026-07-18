@@ -506,8 +506,8 @@ pnpm test:conformance
 pnpm build
 pnpm build:reference
 pnpm size
-pnpm licenses
-pnpm sbom
+pnpm run licenses
+pnpm run sbom
 ```
 
 Completion evidence:

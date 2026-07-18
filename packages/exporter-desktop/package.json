@@ -1,0 +1,23 @@
+{
+  "name": "@rpgnarrativeengine/exporter-desktop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "RPG Narrative Engine exporter-desktop package.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "tsc -b tsconfig.json --clean",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

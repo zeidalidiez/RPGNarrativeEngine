@@ -1,0 +1,10 @@
+.cache/
+build/
+coverage/
+dist/
+node_modules/
+playwright-report/
+test-results/
+pnpm-lock.yaml
+BUILD_PLAN.md
+RPGNarrativeEngine-research-and-spec.md

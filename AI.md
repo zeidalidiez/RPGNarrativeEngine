@@ -1,0 +1,102 @@
+# AI implementation handoff
+
+Last updated: 2026-07-18
+
+This file is the current implementation map for AI agents and human contributors. Update it whenever meaningful code changes. Remove or rewrite stale statements instead of accumulating a historical log here; Git already provides the history.
+
+## Current implementation state
+
+Build Stage 1 is implemented as a working repository foundation:
+
+- pnpm monorepo with an exact pnpm version and Node 24.18.0 LTS pinned for CI.
+- Strict TypeScript 6 configuration with a root tooling config and independent package configs.
+- ESLint flat configuration, Prettier, Vitest, Playwright, and Vite application/library configs.
+- Cross-platform GitHub Actions verification on Windows, macOS, and Linux.
+- All package, first-party module, editor, playground, and showcase boundaries from the build plan are present.
+- Policy scripts enforce public workspace imports, declared workspace dependencies, an acyclic package graph, and the permanent Electron prohibition.
+- Size, dependency-license, and CycloneDX 1.6 inventory commands write generated reports beneath `build/reports/`.
+- Unit fixtures prove cycle detection and Electron dependency rejection.
+
+There is deliberately no story language, compiler, IR, runtime, player, RPG behavior, editor UI, native shell, exporter, or playable showcase yet. Empty package entry points establish buildable boundaries only and must never be described as product features.
+
+## Canonical documents
+
+1. `RPGNarrativeEngine-research-and-spec.md` defines the intended product and acceptance requirements.
+2. `BUILD_PLAN.md` fixes implementation semantics and dependency order.
+3. This file describes what the repository actually implements now.
+
+When they disagree about implemented status, this file and executable tests describe current reality; the spec and build plan still describe the required destination.
+
+## Toolchain
+
+- Node.js: 24.18.0 in `.node-version`, `.nvmrc`, and CI. `package.json` permits compatible Node 24–26 development runtimes.
+- pnpm: exactly 11.15.0 through `packageManager` and engine metadata.
+- TypeScript: 6.0.3. Do not move to TypeScript 7 until the selected `typescript-eslint` release supports it.
+- Modules: native ESM.
+- Browser/app bundling: Vite 8.
+- Unit/integration tests: Vitest 4.
+- Browser tests: Playwright 1.61.
+- Formatting/linting: Prettier 3 and ESLint 10 with typed TypeScript rules.
+
+Dependencies are exact, not range-prefixed. Update them intentionally and commit the resulting lockfile.
+
+## Package ownership
+
+`packages/` owns engine-level concepts:
+
+- `contracts`: public primitives shared by multiple packages. This is the first Stage 2 implementation target.
+- `language`: grammar, CST/AST, formatting, and language services.
+- `project`: project manifests, lockfiles, loaders, migrations, and paths.
+- `ir`: versioned compiler output schemas/readers/writers.
+- `compiler`: resolution, typing, analysis, and lowering.
+- `module-sdk`: first-party module lifecycle, transactions, events, and capabilities.
+- `runtime`: deterministic scheduler, state machine, effects, and saves.
+- `player`: semantic Lit player components and player-facing state projection.
+- `audio`, `theme`, `plugin-sdk`, `editor-source`: their named narrow domains.
+- `build`, `cli`, and exporter packages: shared build orchestration and target adapters.
+- `accessibility` and `testkit`: cross-cutting conformance checks and deterministic fixtures, not generic utility dumping grounds.
+
+`modules/` owns opt-in world, party, inventory, economy, progression, combat, encounters, and quest mechanics. Modules must depend inward through documented SDK/contracts and cannot make core narrative execution require RPG systems.
+
+Do not create generic `utils`, `common`, or `shared` packages. Put behavior in the narrowest semantic owner; only genuinely public cross-package primitives belong in `contracts`.
+
+## Non-negotiable architecture rules
+
+- Electron is permanently prohibited. Desktop applications and packaged games use Tauri 2.
+- Canonical projects are ordinary local files; no mandatory account, cloud service, telemetry, or network dependency.
+- Runtime logic is deterministic and headless. Presentation and audio acknowledge effects but never determine mechanics.
+- Stable IDs are identity. Display labels are never identity.
+- Project source remains human-readable, Git-friendly, and authoritative. Editor changes must round-trip without destroying unrelated text/comments/formatting.
+- Story-only builds cannot pay for disabled RPG modules.
+- Player behavior must remain usable without images, audio, pointer input, animation, or spatial layout.
+- Public package imports go through declared exports. Do not import another workspace's `src/` or reach across directories with relative paths.
+- `README.md` and this file change alongside meaningful implementation changes.
+
+## Commands and evidence
+
+Run `pnpm check` before committing. It currently performs:
+
+1. Formatting verification.
+2. Typed linting.
+3. Package-boundary/cycle and no-Electron policies.
+4. Workspace and tool-script type checking.
+5. Unit, integration, e2e, accessibility, determinism, and conformance command surfaces.
+6. All workspace builds and the showcase boundary build.
+7. Raw/gzip size reporting.
+8. Installed dependency license inventory.
+9. CycloneDX 1.6 SBOM generation.
+
+Some suites intentionally have no domain fixtures yet and use their test runner's explicit pass-with-no-tests option. Replace that state with real tests as each subsystem arrives; never add meaningless assertions merely to make a suite nonempty.
+
+Generated output belongs in `dist/`, `build/`, `coverage/`, `playwright-report/`, or `test-results/` and is ignored. Do not commit it.
+
+## Immediate next implementation order
+
+Build Stage 2 begins in `packages/contracts` and `docs/contracts`:
+
+1. C-01 identifier/namespace types, validators, fixtures, and Markdown contract.
+2. Source positions/spans and C-04 diagnostic structures/codes, serialization fixtures, and safe-fix representation.
+3. Semantic-version compatibility primitives.
+4. Then story grammar/expression contracts before any parser/runtime implementation.
+
+Do not jump into editor screens or game mechanics before their contracts exist. This is a dependency constraint, not a request to reduce the project's scope.

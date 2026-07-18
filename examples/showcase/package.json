@@ -1,0 +1,12 @@
+{
+  "name": "@rpgnarrativeengine/showcase",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Official RPG Narrative Engine showcase and reference game.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "vite build --config ../../vite.app.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

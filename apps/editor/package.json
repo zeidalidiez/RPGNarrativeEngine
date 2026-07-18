@@ -1,0 +1,12 @@
+{
+  "name": "@rpgnarrativeengine/editor",
+  "version": "0.0.0",
+  "private": true,
+  "description": "RPG Narrative Engine authoring application.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "vite build --config ../../vite.app.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}
