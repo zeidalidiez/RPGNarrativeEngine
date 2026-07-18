@@ -1,2 +1,21 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+* text=auto eol=lf
+
+*.7z binary
+*.aab binary
+*.apk binary
+*.dmg binary
+*.exe binary
+*.gif binary
+*.gz binary
+*.ico binary
+*.ipa binary
+*.jpeg binary
+*.jpg binary
+*.msi binary
+*.pdf binary
+*.png binary
+*.tar binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.zip binary

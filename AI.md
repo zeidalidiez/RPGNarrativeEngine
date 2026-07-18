@@ -12,6 +12,7 @@ Build Stage 1 is implemented as a working repository foundation:
 - Strict TypeScript 6 configuration with a root tooling config and independent package configs.
 - ESLint flat configuration, Prettier, Vitest, Playwright, and Vite application/library configs.
 - Cross-platform GitHub Actions verification on Windows, macOS, and Linux.
+- `.gitattributes` normalizes repository text to LF on every platform; do not replace this with host-dependent line endings.
 - All package, first-party module, editor, playground, and showcase boundaries from the build plan are present.
 - Policy scripts enforce public workspace imports, declared workspace dependencies, an acyclic package graph, and the permanent Electron prohibition.
 - Size, dependency-license, and CycloneDX 1.6 inventory commands write generated reports beneath `build/reports/`.

@@ -18,6 +18,8 @@ The complete intended product is documented in:
 
 Use Node.js 24.18.0 LTS and pnpm 11.15.0. The exact versions are recorded in `.node-version`, `.nvmrc`, `package.json`, and CI.
 
+Git normalizes repository text files to LF on every platform so formatting and generated hashes do not change between Windows, macOS, and Linux.
+
 ```sh
 corepack enable
 corepack prepare pnpm@11.15.0 --activate
