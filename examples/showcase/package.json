@@ -5,8 +5,13 @@
   "description": "Official RPG Narrative Engine showcase and reference game.",
   "license": "MIT",
   "type": "module",
+  "dependencies": {
+    "@rpgnarrativeengine/compiler": "workspace:*",
+    "@rpgnarrativeengine/player": "workspace:*"
+  },
   "scripts": {
     "build": "vite build --config ../../vite.app.config.ts",
+    "dev": "vite --config ../../vite.app.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }

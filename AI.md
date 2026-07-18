@@ -6,6 +6,13 @@ This file is the current implementation map for AI agents and human contributors
 
 ## Current implementation state
 
+The repository now has a runnable browser-game path in addition to its contracts and parser:
+
+- `@rpgnarrativeengine/compiler` lowers normalized story ASTs into the versioned types owned by `@rpgnarrativeengine/ir`. It compiles narration/dialogue and safe inline content, expressions, conditionals, adjacent choice groups, `@set`, `@goto`, `@call`, `@return`, and `@ending`. Other commands are retained as host effects. Compilation rejects malformed command arguments, duplicate scenes, invalid start scenes, and missing scene references.
+- `@rpgnarrativeengine/runtime` is a deterministic, DOM-independent interpreter. It owns flat dotted-path narrative variables, strict expression evaluation, nested instruction frames, scene call continuations, conditional/choice execution, state mutation, effect dispatch, explicit and natural completion, restart, and a small player-facing view union. It uses an execution budget to stop non-yielding loops.
+- `@rpgnarrativeengine/player` mounts an accessible browser player with no framework dependency. It creates semantic DOM without `innerHTML`, renders the supported rich-text nodes, exposes native-button choices/continue/restart controls, focuses the active control, and reports runtime failures inside the player.
+- `examples/showcase/story/lighthouse.story` is a seven-scene reference story exercising dialogue, interpolation, state, choice conditions, branches, calls/returns, effects, transitions, and multiple endings. The Vite app compiles it from source in the browser and mounts the real player. Its production build uses relative asset URLs so the output can be served from a GitHub Pages project path.
+
 Build Stage 1 is implemented as a working repository foundation:
 
 - pnpm monorepo with an exact pnpm version and Node 24.18.0 LTS pinned for CI.
@@ -18,18 +25,18 @@ Build Stage 1 is implemented as a working repository foundation:
 - Size, dependency-license, and CycloneDX 1.6 inventory commands write generated reports beneath `build/reports/`.
 - Unit fixtures prove cycle detection and Electron dependency rejection.
 
-Build Stage 2 has begun in `@rpgnarrativeengine/contracts` and `@rpgnarrativeengine/language`:
+The shared contracts and story language currently provide:
 
 - C-01 stable ID grammar, branded ID kinds, reserved first-party namespace enforcement, editor-only ID suggestions, namespace ownership checks, and deterministic rename migration validation/resolution.
 - Half-open source positions/spans using zero-based UTF-16 offsets and one-based lines/columns with fixed LF/CRLF semantics.
 - C-04 diagnostic code ranges, severities, source/related locations, deterministic serialization, release severity policy, and conflict-checked expected-text source edits.
 - Exact SemVer 2.0.0 parsing and precedence without JavaScript integer precision loss, structured compatibility intervals, prerelease policy, and conventional stable/pre-1.0 upper-bound derivation.
 - Published stable-ID, semantic-version, and diagnostic JSON Schemas plus valid/invalid fixtures checked with Ajv 2020.
-- C-02 syntax is fixed in `docs/contracts/story-language.md` and Build Plan sections 11.8-11.9. `@rpgnarrativeengine/language` implements variable-path, finite-number, exact-duration, and quoted-string lexical primitives plus the shared Lezer grammar, generated parser, indentation/context tokenizer, recoverable CST, and source-ranged character/indentation/parse issues. Valid files normalize into a deeply immutable AST for scenes, trivia, generic registered commands, conditionals, choices, narration/dialogue, and safe inline text. Normalization validates stable IDs, dialogue variants, and block markers; rebases embedded choice/`@if`/interpolation expressions to file coordinates; separates comments and content IDs from rendered text; models explicit continuation breaks; decodes documented escapes; supports emphasis, strong text, language spans, and pronunciation hints; and rejects unsafe HTML/tags, nested engine spans, malformed dialogue/markup, shorthand-target/body conflicts, and nested v1 choices. The complete, multiline, malformed, and targeted semantic-rejection cases are exercised by tests. Command-argument semantics and the formatter remain pending.
+- C-02 syntax is fixed in `docs/contracts/story-language.md` and Build Plan sections 11.8-11.9. `@rpgnarrativeengine/language` implements variable-path, finite-number, exact-duration, and quoted-string lexical primitives plus the shared Lezer grammar, generated parser, indentation/context tokenizer, recoverable CST, and source-ranged character/indentation/parse issues. Valid files normalize into a deeply immutable AST for scenes, trivia, generic commands, conditionals, choices, narration/dialogue, and safe inline text. Normalization validates stable IDs, dialogue variants, and block markers; rebases embedded choice/`@if`/interpolation expressions to file coordinates; separates comments and content IDs from rendered text; models explicit continuation breaks; decodes documented escapes; supports emphasis, strong text, language spans, and pronunciation hints; and rejects unsafe HTML/tags, nested engine spans, malformed dialogue/markup, shorthand-target/body conflicts, and nested v1 choices. The compiler currently owns the executable semantics for core commands; a reusable command-schema layer and formatter remain pending.
 - C-03 publishes executable operator precedence, strict typed arithmetic/equality/short-circuit behavior, pure standard functions, module namespace roots, and seeded-random metadata. The same Lezer grammar exposes a standalone expression top rule with tested precedence, calls, booleans, and recovery ranges. Valid expressions normalize into a deeply immutable public AST that is independent of Lezer node shapes; it preserves raw literals, decodes validated values, and attaches shared C-01 UTF-16 source spans. Resolution and type checking remain pending. Random execution remains intentionally absent until C-08 vectors define it.
 - `source-span-map.ts` indexes logical line breaks once and maps arbitrary AST ranges without allocating a position for every source character. Its LF, CRLF, lone-CR, and UTF-16 behavior must stay identical to `@rpgnarrativeengine/contracts`.
 
-There is deliberately no story formatter, compiler, IR, runtime, player, RPG behavior, editor UI, native shell, exporter, or playable showcase yet. Other empty package entry points establish buildable boundaries only and must never be described as product features.
+There is not yet a story formatter, full static type checker, save format, RPG behavior module, editor UI, native shell, or exporter. Empty entry points outside the runnable path still establish buildable boundaries only and must not be described as implemented product features.
 
 ## Canonical documents
 
@@ -60,11 +67,11 @@ Dependencies are exact, not range-prefixed. Update them intentionally and commit
 - `contracts`: public primitives shared by multiple packages. It currently owns stable IDs, semantic versions and compatibility intervals, source locations, diagnostics, safe text-edit descriptions, their schemas, and their fixtures.
 - `language`: owns the story/expression grammar, CST/AST, formatting, and language services. It currently implements lexical contract helpers, executable expression primitives/metadata, the shared generated Lezer CST parser, the normalized expression AST/source mapper, and story/dialogue/safe-inline AST normalization. Command semantics, formatting, and higher language services remain pending.
 - `project`: project manifests, lockfiles, loaders, migrations, and paths.
-- `ir`: versioned compiler output schemas/readers/writers.
-- `compiler`: resolution, typing, analysis, and lowering.
+- `ir`: currently owns the TypeScript shape of version-1 compiled games, expressions, inline content, scenes, choices, and instructions. JSON schema/readers/migrations remain pending.
+- `compiler`: currently parses and lowers a complete playable story into IR, validates scene references, and gives core flow commands executable meaning. Full project-aware resolution, typing, analysis, diagnostics, and module lowering remain pending.
 - `module-sdk`: first-party module lifecycle, transactions, events, and capabilities.
-- `runtime`: deterministic scheduler, state machine, effects, and saves.
-- `player`: semantic Lit player components and player-facing state projection.
+- `runtime`: currently owns the deterministic narrative interpreter, variable state, expression execution, call/control stacks, effects, and player-facing projection. Scheduling, RNG, save serialization, migrations, module transactions, and replay logs remain pending.
+- `player`: currently owns the dependency-free semantic DOM player. Themed components, backlog/history, settings, save/load UI, audio controls, and localization UI remain pending.
 - `audio`, `theme`, `plugin-sdk`, `editor-source`: their named narrow domains.
 - `build`, `cli`, and exporter packages: shared build orchestration and target adapters.
 - `accessibility` and `testkit`: cross-cutting conformance checks and deterministic fixtures, not generic utility dumping grounds.
@@ -87,7 +94,7 @@ Do not create generic `utils`, `common`, or `shared` packages. Put behavior in t
 
 ## Commands and evidence
 
-Run `pnpm check` before committing. It currently performs:
+Run `pnpm check` before committing. For focused work on the runnable path, `pnpm --filter @rpgnarrativeengine/showcase... build` builds the compiler, IR, runtime, player, and demo in dependency order. The complete check performs:
 
 1. Formatting verification.
 2. Typed linting.
@@ -105,11 +112,10 @@ Ordinary generated build output belongs in `dist/`, `build/`, `coverage/`, `play
 
 ## Immediate next implementation order
 
-Continue Build Stage 2 in `packages/language`, then `packages/contracts` and `packages/project`:
+Build outward from the working path rather than returning to contract-only work:
 
-1. Complete C-02 command-argument normalization, then implement the idempotent formatter against the committed corpus.
-2. Implement the C-03 expression resolver and type checker on the normalized expression AST using the fixed precedence and semantics.
-3. Add project manifest, feature, path, lockfile, and asset contracts.
-4. Continue through the remaining contract corpus before dependent runtime/editor behavior.
-
-Do not jump into editor screens or game mechanics before their contracts exist. This is a dependency constraint, not a request to reduce the project's scope.
+1. Add the project manifest/loader so the compiler can build a creator project instead of a single source string.
+2. Put the compiler and player behind the browser playground UI with source editing, diagnostics, and live restart.
+3. Add runtime save snapshots and deterministic RNG, then expose save/load in the player.
+4. Build shared export orchestration for the static web target and wire it to both CLI and GUI entry points.
+5. Continue command schemas, static typing, formatting, localization, modules, and native Tauri targets as those working paths require them.

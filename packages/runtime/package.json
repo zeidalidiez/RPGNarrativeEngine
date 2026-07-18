@@ -15,6 +15,9 @@
   "files": [
     "dist"
   ],
+  "dependencies": {
+    "@rpgnarrativeengine/ir": "workspace:*"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "tsc -b tsconfig.json --clean",

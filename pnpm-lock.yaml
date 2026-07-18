@@ -64,7 +64,14 @@ importers:
 
   apps/playground: {}
 
-  examples/showcase: {}
+  examples/showcase:
+    dependencies:
+      '@rpgnarrativeengine/compiler':
+        specifier: workspace:*
+        version: link:../../packages/compiler
+      '@rpgnarrativeengine/player':
+        specifier: workspace:*
+        version: link:../../packages/player
 
   modules/combat: {}
 
@@ -90,7 +97,14 @@ importers:
 
   packages/cli: {}
 
-  packages/compiler: {}
+  packages/compiler:
+    dependencies:
+      '@rpgnarrativeengine/ir':
+        specifier: workspace:*
+        version: link:../ir
+      '@rpgnarrativeengine/language':
+        specifier: workspace:*
+        version: link:../language
 
   packages/contracts: {}
 
@@ -122,13 +136,24 @@ importers:
 
   packages/module-sdk: {}
 
-  packages/player: {}
+  packages/player:
+    dependencies:
+      '@rpgnarrativeengine/ir':
+        specifier: workspace:*
+        version: link:../ir
+      '@rpgnarrativeengine/runtime':
+        specifier: workspace:*
+        version: link:../runtime
 
   packages/plugin-sdk: {}
 
   packages/project: {}
 
-  packages/runtime: {}
+  packages/runtime:
+    dependencies:
+      '@rpgnarrativeengine/ir':
+        specifier: workspace:*
+        version: link:../ir
 
   packages/testkit: {}
 

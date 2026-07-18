@@ -3,10 +3,45 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RPG Narrative Engine Showcase</title>
+    <meta
+      name="description"
+      content="A playable story built with the open-source RPG Narrative Engine."
+    />
+    <meta name="theme-color" content="#09151c" />
+    <title>The Light at Brinewatch · RPG Narrative Engine</title>
   </head>
   <body>
-    <div id="app"></div>
+    <main class="showcase-shell">
+      <header class="showcase-header">
+        <a
+          class="engine-mark"
+          href="https://github.com/zeidalidiez/RPGNarrativeEngine"
+          aria-label="RPG Narrative Engine repository"
+        >
+          <span class="engine-glyph" aria-hidden="true">RNE</span>
+          <span>RPG Narrative Engine</span>
+        </a>
+        <p id="atmosphere" class="atmosphere" aria-live="polite">The storm is approaching</p>
+      </header>
+
+      <section class="story-intro" aria-labelledby="story-title">
+        <p class="kicker">A playable engine demo</p>
+        <h1 id="story-title">The Light at Brinewatch</h1>
+        <p class="dek">
+          A keeper, a darkened beacon, and one hour before the mail ship reaches the rocks.
+        </p>
+      </section>
+
+      <div id="player" class="player-frame"></div>
+
+      <footer class="showcase-footer">
+        <p>
+          Written in <code>.story</code>, compiled in the browser, and played by the same runtime
+          intended for exported games.
+        </p>
+      </footer>
+    </main>
+    <noscript>This playable story requires JavaScript.</noscript>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>
