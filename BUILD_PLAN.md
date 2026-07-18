@@ -483,7 +483,7 @@ Create:
 - ESLint flat configuration, Prettier, Vitest, Playwright, and type-check scripts.
 - Vite library/application build configurations.
 - Package-boundary and cycle checks.
-- Cross-platform CI for Windows, macOS, and Linux package builds/tests.
+- One fast Linux CI job for repository-wide checks. Add Windows/macOS and target-specific jobs only when native editor/exporter code or a platform-specific artifact exists to exercise.
 - Root `README.md`, `AI.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, and ADR template.
 - Dependency license inventory, SBOM command, and bundle-size reporting.
 - Repository policy test that rejects Electron dependencies/imports/configuration.
@@ -512,7 +512,7 @@ pnpm run sbom
 
 Completion evidence:
 
-- Clean install and all root commands run on every CI platform.
+- Clean install and all root commands run in the primary Linux CI environment. Platform-specific commands run on their applicable hosts once those targets exist.
 - Workspace packages cannot import undocumented internal paths.
 - An intentionally added dependency cycle fails CI.
 - An intentionally added Electron import fails policy checks.

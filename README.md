@@ -6,7 +6,7 @@ The editor will use Tauri 2. Electron is not and will not be part of this projec
 
 ## Current status
 
-The repository is in its foundation stage. The workspace, strict TypeScript toolchain, cross-platform CI, package boundaries, policy checks, build reporting, application shells, and first-party module boundaries exist. The story language, compiler, runtime, editor UI, player, and public showcase are not implemented yet; the next work is the executable contract corpus described in Build Stage 2.
+The repository is in its foundation stage. The workspace, strict TypeScript toolchain, focused Linux CI, package boundaries, policy checks, build reporting, application shells, and first-party module boundaries exist. The story language, compiler, runtime, editor UI, player, and public showcase are not implemented yet; the next work is the executable contract corpus described in Build Stage 2.
 
 The complete intended product is documented in:
 

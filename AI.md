@@ -11,7 +11,7 @@ Build Stage 1 is implemented as a working repository foundation:
 - pnpm monorepo with an exact pnpm version and Node 24.18.0 LTS pinned for CI.
 - Strict TypeScript 6 configuration with a root tooling config and independent package configs.
 - ESLint flat configuration, Prettier, Vitest, Playwright, and Vite application/library configs.
-- Cross-platform GitHub Actions verification on Windows, macOS, and Linux.
+- One fast Linux GitHub Actions verification job. Do not add an operating-system matrix until native editor/exporter work creates real platform-specific behavior to test.
 - `.gitattributes` normalizes repository text to LF on every platform; do not replace this with host-dependent line endings.
 - All package, first-party module, editor, playground, and showcase boundaries from the build plan are present.
 - Policy scripts enforce public workspace imports, declared workspace dependencies, an acyclic package graph, and the permanent Electron prohibition.
