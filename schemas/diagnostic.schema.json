@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rpgnarrativeengine.dev/schemas/diagnostic.schema.json",
+  "title": "RPG Narrative Engine diagnostic",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "severity", "message", "location", "related", "fixes", "tags"],
+  "properties": {
+    "code": {
+      "type": "string",
+      "pattern": "^RPGNE[1-9][0-9]{3}$"
+    },
+    "severity": {
+      "enum": ["error", "warning", "information"]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\r\\n]+$"
+    },
+    "location": {
+      "$ref": "#/$defs/sourceLocation"
+    },
+    "related": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/relatedLocation"
+      }
+    },
+    "fixes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/fix"
+      }
+    },
+    "tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": ["accessibility", "deprecated", "security", "unnecessary"]
+      }
+    }
+  },
+  "$defs": {
+    "sourcePosition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offset", "line", "column"],
+      "properties": {
+        "offset": { "type": "integer", "minimum": 0 },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "sourceSpan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "$ref": "#/$defs/sourcePosition" },
+        "end": { "$ref": "#/$defs/sourcePosition" }
+      }
+    },
+    "sourceLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "span"],
+      "properties": {
+        "file": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "span": { "$ref": "#/$defs/sourceSpan" }
+      }
+    },
+    "relatedLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message", "location"],
+      "properties": {
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^\\r\\n]+$"
+        },
+        "location": { "$ref": "#/$defs/sourceLocation" }
+      }
+    },
+    "textEdit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "span", "expectedText", "replacement"],
+      "properties": {
+        "file": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "span": { "$ref": "#/$defs/sourceSpan" },
+        "expectedText": { "type": "string" },
+        "replacement": { "type": "string" }
+      }
+    },
+    "fix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "applicability", "edits"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^\\r\\n]+$"
+        },
+        "applicability": { "enum": ["automatic", "suggested"] },
+        "edits": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/textEdit" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+[
+  { "input": "", "codes": ["empty"] },
+  { "input": "Mara", "codes": ["invalid-character"] },
+  { "input": ".start", "codes": ["empty-namespace-segment"] },
+  { "input": "start.", "codes": ["empty-namespace-segment"] },
+  { "input": "a..b", "codes": ["empty-namespace-segment"] },
+  { "input": "café", "codes": ["invalid-character"] },
+  { "input": "space id", "codes": ["invalid-character"] },
+  { "input": "slash/id", "codes": ["invalid-character"] }
+]

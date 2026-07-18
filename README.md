@@ -6,13 +6,15 @@ The editor will use Tauri 2. Electron is not and will not be part of this projec
 
 ## Current status
 
-The repository is in its foundation stage. The workspace, strict TypeScript toolchain, focused Linux CI, package boundaries, policy checks, build reporting, application shells, and first-party module boundaries exist. The story language, compiler, runtime, editor UI, player, and public showcase are not implemented yet; the next work is the executable contract corpus described in Build Stage 2.
+The repository has its foundation and the first executable contracts. The workspace, strict TypeScript toolchain, focused Linux CI, package boundaries, policy checks, build reporting, application shells, and first-party module boundaries exist. Stable IDs/namespaces, UTF-16 source spans, diagnostics, safe source-edit descriptions, TypeScript APIs, JSON Schemas, and valid/invalid fixtures are implemented. The story language, compiler, runtime, editor UI, player, and public showcase are not implemented yet.
 
 The complete intended product is documented in:
 
 - [Research and specification](./RPGNarrativeEngine-research-and-spec.md)
 - [Dependency-ordered build plan](./BUILD_PLAN.md)
 - [Implementation handoff for AI contributors](./AI.md)
+
+Implemented public foundation contracts are indexed in [docs/contracts](./docs/contracts/README.md).
 
 ## Development setup
 

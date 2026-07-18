@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rpgnarrativeengine.dev/schemas/stable-id.schema.json",
+  "title": "RPG Narrative Engine stable ID",
+  "description": "A canonical lowercase ASCII identifier. Dots separate non-empty namespace segments.",
+  "type": "string",
+  "minLength": 1,
+  "maxLength": 128,
+  "pattern": "^[a-z0-9_-]+(?:\\.[a-z0-9_-]+)*$"
+}
