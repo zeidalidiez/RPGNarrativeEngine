@@ -97,16 +97,18 @@ Do not create generic `utils`, `common`, or `shared` packages. Put behavior in t
 Run `pnpm check` before committing. For focused work on the runnable path, `pnpm --filter @rpgnarrativeengine/showcase... build` builds the compiler, IR, runtime, player, and demo in dependency order. The complete check performs:
 
 1. Formatting verification.
-2. Typed linting.
-3. Package-boundary/cycle and no-Electron policies.
-4. Workspace and tool-script type checking.
-5. Unit, integration, e2e, accessibility, determinism, and conformance command surfaces.
-6. All workspace builds and the showcase boundary build.
+2. All workspace builds, which create the package declarations required for clean-checkout typed module resolution.
+3. Typed linting against those public package declarations.
+4. Package-boundary/cycle and no-Electron policies.
+5. Workspace and tool-script type checking.
+6. Unit, integration, e2e, accessibility, determinism, and conformance command surfaces.
 7. Raw/gzip size reporting.
 8. Installed dependency license inventory.
 9. CycloneDX 1.6 SBOM generation.
 
 Some suites intentionally have no domain fixtures yet and use their test runner's explicit pass-with-no-tests option. Replace that state with real tests as each subsystem arrives; never add meaningless assertions merely to make a suite nonempty.
+
+`pnpm lint` first builds package/module declarations and then runs `lint:source`; do not remove that prerequisite while workspace package exports point at `dist`. CI starts from a clean checkout with no ignored `dist` folders, while a developer's tree may retain them and otherwise hide unresolved-type lint failures.
 
 Ordinary generated build output belongs in `dist/`, `build/`, `coverage/`, `playwright-report/`, or `test-results/` and is ignored. Do not commit it. The exception is `packages/language/src/story-parser.generated*.ts`: these deterministic Lezer sources are committed so type checking and editor consumers work from a clean checkout. Regenerate them from `story.grammar`; never edit them by hand.
 
