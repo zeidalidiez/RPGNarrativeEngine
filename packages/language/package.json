@@ -17,7 +17,8 @@
   ],
   "dependencies": {
     "@lezer/common": "catalog:",
-    "@lezer/lr": "catalog:"
+    "@lezer/lr": "catalog:",
+    "@rpgnarrativeengine/contracts": "workspace:*"
   },
   "devDependencies": {
     "@lezer/generator": "catalog:"

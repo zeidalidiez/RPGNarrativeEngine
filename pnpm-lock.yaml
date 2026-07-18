@@ -112,6 +112,9 @@ importers:
       '@lezer/lr':
         specifier: 'catalog:'
         version: 1.4.10
+      '@rpgnarrativeengine/contracts':
+        specifier: workspace:*
+        version: link:../contracts
     devDependencies:
       '@lezer/generator':
         specifier: 'catalog:'

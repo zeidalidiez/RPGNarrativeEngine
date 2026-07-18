@@ -1,6 +1,6 @@
 # C-03: Expression contract
 
-Status: Lexical forms, Lezer parser, operator/function metadata, and executable primitive semantics implemented; resolver, type checker, and seeded RNG adapter pending
+Status: Lexical forms, Lezer parser, normalized AST, operator/function metadata, and executable primitive semantics implemented; resolver, type checker, and seeded RNG adapter pending
 
 Expressions are a closed, typed language. They cannot access JavaScript globals, properties, prototypes, the DOM, filesystem, clock, network, or arbitrary functions.
 
@@ -73,6 +73,6 @@ Plugins register function signatures containing parameter/result types and deter
 
 - `tests/fixtures/language/expression-operators.json` is the canonical precedence/associativity table.
 - `tests/fixtures/language/expression-vectors.json` covers strict arithmetic, comparison, equality, concatenation, rounding, clamping, and Unicode length.
-- Unit tests prove parser precedence/recovery, short-circuit behavior, no coercion, zero-divisor errors, finite-result enforcement, and seeded-random metadata.
+- Unit tests prove parser precedence/recovery, immutable AST normalization and source spans, literal validation, short-circuit behavior, no coercion, zero-divisor errors, finite-result enforcement, and seeded-random metadata.
 
 The type checker must add source-aware success and failure fixtures before C-03 is treated as complete. C-08 must add exact random output/draw-count vectors before `random` can execute.

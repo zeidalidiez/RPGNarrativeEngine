@@ -26,7 +26,8 @@ Build Stage 2 has begun in `@rpgnarrativeengine/contracts` and `@rpgnarrativeeng
 - Exact SemVer 2.0.0 parsing and precedence without JavaScript integer precision loss, structured compatibility intervals, prerelease policy, and conventional stable/pre-1.0 upper-bound derivation.
 - Published stable-ID, semantic-version, and diagnostic JSON Schemas plus valid/invalid fixtures checked with Ajv 2020.
 - C-02 syntax is fixed in `docs/contracts/story-language.md` and Build Plan sections 11.8-11.9. `@rpgnarrativeengine/language` implements variable-path, finite-number, exact-duration, and quoted-string lexical primitives plus the shared Lezer grammar, generated parser, indentation/context tokenizer, recoverable CST, and source-ranged character/indentation/parse issues. The complete, multiline, and malformed story corpus is exercised by parser tests. CST-to-AST normalization and the formatter remain pending.
-- C-03 publishes executable operator precedence, strict typed arithmetic/equality/short-circuit behavior, pure standard functions, module namespace roots, and seeded-random metadata. The same Lezer grammar exposes a standalone expression top rule with tested precedence, calls, booleans, and recovery ranges. Resolution and type checking remain pending. Random execution remains intentionally absent until C-08 vectors define it.
+- C-03 publishes executable operator precedence, strict typed arithmetic/equality/short-circuit behavior, pure standard functions, module namespace roots, and seeded-random metadata. The same Lezer grammar exposes a standalone expression top rule with tested precedence, calls, booleans, and recovery ranges. Valid expressions normalize into a deeply immutable public AST that is independent of Lezer node shapes; it preserves raw literals, decodes validated values, and attaches shared C-01 UTF-16 source spans. Resolution and type checking remain pending. Random execution remains intentionally absent until C-08 vectors define it.
+- `source-span-map.ts` indexes logical line breaks once and maps arbitrary AST ranges without allocating a position for every source character. Its LF, CRLF, lone-CR, and UTF-16 behavior must stay identical to `@rpgnarrativeengine/contracts`.
 
 There is deliberately no normalized story AST, compiler, IR, runtime, player, RPG behavior, editor UI, native shell, exporter, or playable showcase yet. Other empty package entry points establish buildable boundaries only and must never be described as product features.
 
@@ -57,7 +58,7 @@ Dependencies are exact, not range-prefixed. Update them intentionally and commit
 `packages/` owns engine-level concepts:
 
 - `contracts`: public primitives shared by multiple packages. It currently owns stable IDs, semantic versions and compatibility intervals, source locations, diagnostics, safe text-edit descriptions, their schemas, and their fixtures.
-- `language`: owns the story/expression grammar, CST/AST, formatting, and language services. It currently implements lexical contract helpers, executable expression primitives/metadata, and the shared generated Lezer CST parser. Semantic AST normalization, formatting, and higher language services remain pending.
+- `language`: owns the story/expression grammar, CST/AST, formatting, and language services. It currently implements lexical contract helpers, executable expression primitives/metadata, the shared generated Lezer CST parser, and the normalized expression AST/source mapper. Story AST normalization, formatting, and higher language services remain pending.
 - `project`: project manifests, lockfiles, loaders, migrations, and paths.
 - `ir`: versioned compiler output schemas/readers/writers.
 - `compiler`: resolution, typing, analysis, and lowering.
@@ -106,8 +107,8 @@ Ordinary generated build output belongs in `dist/`, `build/`, `coverage/`, `play
 
 Continue Build Stage 2 in `packages/language`, then `packages/contracts` and `packages/project`:
 
-1. Normalize the shared Lezer C-02 CST into a semantic AST with source ranges, then implement the idempotent formatter against the committed corpus.
-2. Implement the C-03 expression resolver and type checker on the standalone parser output using the fixed precedence and semantics.
+1. Normalize the shared Lezer C-02 story CST into a semantic AST with source ranges, then implement the idempotent formatter against the committed corpus.
+2. Implement the C-03 expression resolver and type checker on the normalized expression AST using the fixed precedence and semantics.
 3. Add project manifest, feature, path, lockfile, and asset contracts.
 4. Continue through the remaining contract corpus before dependent runtime/editor behavior.
 

@@ -21,6 +21,20 @@ export {
   type UnaryExpressionOperator,
 } from './expression-contract.js';
 export {
+  parseExpressionAst,
+  type BinaryExpressionAst,
+  type BinaryExpressionOperator,
+  type BooleanLiteralExpressionAst,
+  type CallExpressionAst,
+  type ExpressionAst,
+  type ExpressionAstParseResult,
+  type GroupExpressionAst,
+  type NumberLiteralExpressionAst,
+  type StringLiteralExpressionAst,
+  type UnaryExpressionAst,
+  type VariableExpressionAst,
+} from './expression-ast.js';
+export {
   STORY_DURATION_PATTERN_SOURCE,
   STORY_FILE_EXTENSION,
   STORY_INDENT,

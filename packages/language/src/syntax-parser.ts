@@ -3,7 +3,12 @@ import type { Tree } from '@lezer/common';
 import { parser as generatedParser } from './story-parser.generated.js';
 
 export type SyntaxIssueCode =
-  'bom-position' | 'invalid-indentation' | 'lone-carriage-return' | 'parse-error' | 'tab-character';
+  | 'bom-position'
+  | 'invalid-indentation'
+  | 'invalid-token'
+  | 'lone-carriage-return'
+  | 'parse-error'
+  | 'tab-character';
 
 export interface SyntaxIssue {
   readonly code: SyntaxIssueCode;
