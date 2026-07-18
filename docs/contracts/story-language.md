@@ -1,6 +1,6 @@
 # C-02: Story grammar contract
 
-Status: Syntax fixed; lexical primitives and fixtures implemented; Lezer parser, recovery tree, AST normalization, and formatter pending
+Status: Syntax, lexical primitives, fixtures, and recoverable Lezer CST implemented; AST normalization and formatter pending
 
 This document is normative for `.story` source. The parser and editor grammar must accept exactly this surface and must not create a second, more permissive release grammar.
 
@@ -29,7 +29,7 @@ Indentation has only two semantic jobs: nesting conditional/choice bodies and co
 | Content suffix          | Whitespace followed by `^stable.content.id` as the final non-comment element of narration, dialogue, or a choice header.                                                              |
 | Interpolation           | `{{ expression }}` inside translatable text. The closing delimiter is found with expression quote awareness; nesting interpolation is invalid.                                        |
 
-The exported lexical constants and parsers in `@rpgnarrativeengine/language` are shared by the future Lezer external tokenizers, compiler adapters, forms, and tests.
+The exported lexical constants and parsers in `@rpgnarrativeengine/language` are shared by the Lezer external tokenizers, future compiler adapters, forms, and tests.
 
 ## Scenes and control flow
 
@@ -146,4 +146,4 @@ Committed corpus:
 - `tests/fixtures/language/multiline.story`: continuations, escapes, interpolation, and safe markup.
 - `tests/fixtures/language/malformed.story`: recovery targets for headers, indentation, blocks, dialogue, choices, durations, and endings.
 
-The C-02 contract is not complete in code until the Lezer tree, normalized AST, source ranges, recovery expectations, and formatter idempotence tests consume these fixtures.
+The generated Lezer tree, source-ranged syntax issues, and recovery tests consume these fixtures now. C-02 is not complete in code until the normalized AST and formatter idempotence tests consume the same corpus.

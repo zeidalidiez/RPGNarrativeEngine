@@ -36,3 +36,13 @@ export {
   type StoryTokenKind,
   type VariablePath,
 } from './lexical-contract.js';
+export {
+  expressionParser,
+  parseExpressionSyntax,
+  parseStorySyntax,
+  storyParser,
+  syntaxTreeHasErrors,
+  type SyntaxIssue,
+  type SyntaxIssueCode,
+  type SyntaxParseResult,
+} from './syntax-parser.js';

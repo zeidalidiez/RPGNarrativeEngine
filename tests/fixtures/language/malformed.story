@@ -1,4 +1,4 @@
-// Each line intentionally represents a recovery case for the future Lezer parser.
+// Each line intentionally represents a recovery case for the Lezer parser.
 :: Invalid Scene
 
 @if trust >

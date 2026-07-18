@@ -1,0 +1,114 @@
+@top Story { bom? StoryTrivia* Scene* }
+
+@top Expression { expression }
+
+@context trackIndent from "./story-tokens.js"
+
+@external tokens indentation from "./story-tokens.js" {
+  indent,
+  dedent,
+  invalidIndent,
+  blankLine,
+  commentLine
+}
+
+@external specialize { CommandLine } specializeCommand from "./story-tokens.js" {
+  IfLine,
+  ElseLine,
+  EndLine
+}
+
+@skip { horizontalSpace }
+
+StoryTrivia { (blankLine | commentLine) lineEnd }
+
+Scene { SceneHeaderLine lineEnd SceneItem* }
+
+SceneItem {
+  StoryTrivia |
+  Conditional |
+  Choice |
+  CommandStatement |
+  TextStatement
+}
+
+Conditional { IfLine lineEnd StoryBlock ElseClause? EndLine lineEnd }
+
+ElseClause { ElseLine lineEnd StoryBlock }
+
+StoryBlock { (indent | InvalidIndent) SceneItem+ (dedent | eof) }
+
+InvalidIndent { invalidIndent }
+
+Choice { ChoiceLine lineEnd StoryBlock? }
+
+CommandStatement { CommandLine lineEnd }
+
+TextStatement { TextLine lineEnd TextContinuation? }
+
+TextContinuation { (indent | InvalidIndent) TextLine lineEnd (TextLine lineEnd)* (dedent | eof) }
+
+lineEnd { newline | eof }
+
+expression { LogicalOrExpression }
+
+LogicalOrExpression { LogicalAndExpression ("||" LogicalAndExpression)* }
+
+LogicalAndExpression { EqualityExpression ("&&" EqualityExpression)* }
+
+EqualityExpression { ComparisonExpression (("==" | "!=") ComparisonExpression)* }
+
+ComparisonExpression { AdditiveExpression (("<" | "<=" | ">" | ">=") AdditiveExpression)* }
+
+AdditiveExpression { MultiplicativeExpression (("+" | "-") MultiplicativeExpression)* }
+
+MultiplicativeExpression { UnaryExpression (("*" | "/" | "%") UnaryExpression)* }
+
+UnaryExpression { ("!" | "-") UnaryExpression | PrimaryExpression }
+
+PrimaryExpression {
+  BooleanLiteral |
+  NumberLiteral |
+  StringLiteral |
+  CallExpression |
+  VariableExpression |
+  ParenthesizedExpression
+}
+
+CallExpression { VariablePath "(" ArgumentList? ")" }
+
+ArgumentList { expression ("," expression)* }
+
+VariableExpression { VariablePath }
+
+ParenthesizedExpression { "(" expression ")" }
+
+BooleanLiteral { @specialize<VariablePath, "true"> | @specialize<VariablePath, "false"> }
+
+@tokens {
+  bom { "\u{feff}" }
+  horizontalSpace { $[ \t]+ }
+  newline { "\r\n" | "\n" }
+  eof { @eof }
+
+  SceneHeaderLine { "::" ![\r\n]* }
+  ChoiceLine { "*" ![\r\n]* }
+  CommandLine { "@" ![\r\n]* }
+  TextLine { ![\r\n]+ }
+
+  NumberLiteral { ("0" | $[1-9] $[0-9]*) ("." $[0-9]+)? ($[eE] $[+\-]? $[0-9]+)? }
+  VariablePath { $[a-z_] $[a-z0-9_]* ("." $[a-z_] $[a-z0-9_]*)* }
+  StringLiteral { "\"" (![\"\\\r\n] | "\\" ![\r\n])* "\"" }
+
+  "||" "&&" "==" "!=" "<" "<=" ">" ">="
+  "+" "-" "*" "/" "%" "!"
+  "(" ")" ","
+
+  @precedence {
+    SceneHeaderLine,
+    ChoiceLine,
+    CommandLine,
+    horizontalSpace,
+    TextLine
+  }
+}

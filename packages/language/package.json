@@ -15,9 +15,17 @@
   "files": [
     "dist"
   ],
+  "dependencies": {
+    "@lezer/common": "catalog:",
+    "@lezer/lr": "catalog:"
+  },
+  "devDependencies": {
+    "@lezer/generator": "catalog:"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "pnpm run generate:parser && tsc -p tsconfig.json",
     "clean": "tsc -b tsconfig.json --clean",
+    "generate:parser": "lezer-generator --typeScript --output src/story-parser.generated.ts src/story.grammar",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }

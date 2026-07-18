@@ -25,10 +25,10 @@ Build Stage 2 has begun in `@rpgnarrativeengine/contracts` and `@rpgnarrativeeng
 - C-04 diagnostic code ranges, severities, source/related locations, deterministic serialization, release severity policy, and conflict-checked expected-text source edits.
 - Exact SemVer 2.0.0 parsing and precedence without JavaScript integer precision loss, structured compatibility intervals, prerelease policy, and conventional stable/pre-1.0 upper-bound derivation.
 - Published stable-ID, semantic-version, and diagnostic JSON Schemas plus valid/invalid fixtures checked with Ajv 2020.
-- C-02 syntax is fixed in `docs/contracts/story-language.md` and Build Plan sections 11.8-11.9. `@rpgnarrativeengine/language` implements variable-path, finite-number, exact-duration, and quoted-string lexical primitives; valid multiline/complete sources and a malformed recovery corpus are committed. The Lezer parser/CST/AST/formatter do not exist yet.
-- C-03 publishes executable operator precedence, strict typed arithmetic/equality/short-circuit behavior, pure standard functions, module namespace roots, and seeded-random metadata. Random execution remains intentionally absent until C-08 vectors define it.
+- C-02 syntax is fixed in `docs/contracts/story-language.md` and Build Plan sections 11.8-11.9. `@rpgnarrativeengine/language` implements variable-path, finite-number, exact-duration, and quoted-string lexical primitives plus the shared Lezer grammar, generated parser, indentation/context tokenizer, recoverable CST, and source-ranged character/indentation/parse issues. The complete, multiline, and malformed story corpus is exercised by parser tests. CST-to-AST normalization and the formatter remain pending.
+- C-03 publishes executable operator precedence, strict typed arithmetic/equality/short-circuit behavior, pure standard functions, module namespace roots, and seeded-random metadata. The same Lezer grammar exposes a standalone expression top rule with tested precedence, calls, booleans, and recovery ranges. Resolution and type checking remain pending. Random execution remains intentionally absent until C-08 vectors define it.
 
-There is deliberately no story parser, compiler, IR, runtime, player, RPG behavior, editor UI, native shell, exporter, or playable showcase yet. Other empty package entry points establish buildable boundaries only and must never be described as product features.
+There is deliberately no normalized story AST, compiler, IR, runtime, player, RPG behavior, editor UI, native shell, exporter, or playable showcase yet. Other empty package entry points establish buildable boundaries only and must never be described as product features.
 
 ## Canonical documents
 
@@ -48,6 +48,7 @@ When they disagree about implemented status, this file and executable tests desc
 - Unit/integration tests: Vitest 4.
 - Browser tests: Playwright 1.61.
 - Formatting/linting: Prettier 3 and ESLint 10 with typed TypeScript rules.
+- Parsing: Lezer Generator 1.8.0, Lezer LR 1.4.10, and Lezer Common 1.5.2.
 
 Dependencies are exact, not range-prefixed. Update them intentionally and commit the resulting lockfile.
 
@@ -56,7 +57,7 @@ Dependencies are exact, not range-prefixed. Update them intentionally and commit
 `packages/` owns engine-level concepts:
 
 - `contracts`: public primitives shared by multiple packages. It currently owns stable IDs, semantic versions and compatibility intervals, source locations, diagnostics, safe text-edit descriptions, their schemas, and their fixtures.
-- `language`: owns the story/expression grammar, CST/AST, formatting, and language services. It currently implements only lexical contract helpers and executable expression primitives/metadata; parsing and language services remain pending.
+- `language`: owns the story/expression grammar, CST/AST, formatting, and language services. It currently implements lexical contract helpers, executable expression primitives/metadata, and the shared generated Lezer CST parser. Semantic AST normalization, formatting, and higher language services remain pending.
 - `project`: project manifests, lockfiles, loaders, migrations, and paths.
 - `ir`: versioned compiler output schemas/readers/writers.
 - `compiler`: resolution, typing, analysis, and lowering.
@@ -99,14 +100,14 @@ Run `pnpm check` before committing. It currently performs:
 
 Some suites intentionally have no domain fixtures yet and use their test runner's explicit pass-with-no-tests option. Replace that state with real tests as each subsystem arrives; never add meaningless assertions merely to make a suite nonempty.
 
-Generated output belongs in `dist/`, `build/`, `coverage/`, `playwright-report/`, or `test-results/` and is ignored. Do not commit it.
+Ordinary generated build output belongs in `dist/`, `build/`, `coverage/`, `playwright-report/`, or `test-results/` and is ignored. Do not commit it. The exception is `packages/language/src/story-parser.generated*.ts`: these deterministic Lezer sources are committed so type checking and editor consumers work from a clean checkout. Regenerate them from `story.grammar`; never edit them by hand.
 
 ## Immediate next implementation order
 
-Continue Build Stage 2 in `packages/contracts` and `docs/contracts`:
+Continue Build Stage 2 in `packages/language`, then `packages/contracts` and `packages/project`:
 
-1. Implement the shared Lezer C-02 grammar, recovery tree, normalized AST/source ranges, and idempotent formatter against the committed corpus.
-2. Implement the C-03 expression parser, resolver, and type checker using the fixed precedence and semantics.
+1. Normalize the shared Lezer C-02 CST into a semantic AST with source ranges, then implement the idempotent formatter against the committed corpus.
+2. Implement the C-03 expression resolver and type checker on the standalone parser output using the fixed precedence and semantics.
 3. Add project manifest, feature, path, lockfile, and asset contracts.
 4. Continue through the remaining contract corpus before dependent runtime/editor behavior.
 
