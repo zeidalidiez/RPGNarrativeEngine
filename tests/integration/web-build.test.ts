@@ -1,8 +1,11 @@
-import { readFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
 import { buildWebProject } from '../../packages/build/src/index.js';
+import { buildProjectDirectory } from '../../packages/cli/src/index.js';
 import type { ProjectFileInput } from '../../packages/project/src/index.js';
 
 async function starterProject(): Promise<readonly ProjectFileInput[]> {
@@ -68,5 +71,67 @@ describe('web project build', () => {
     expect(
       manifest.artifacts.every((artifact) => artifact.gameBundleHash === first.gameBundleHash),
     ).toBe(true);
+  });
+
+  it('promotes filesystem output atomically and preserves the last build after compilation fails', async () => {
+    const temporaryParent = fileURLToPath(new URL('../../build/', import.meta.url));
+    await mkdir(temporaryParent, { recursive: true });
+    const projectDirectory = await mkdtemp(path.join(temporaryParent, 'cli-integration-'));
+    try {
+      const files = await starterProject();
+      for (const file of files) {
+        const destination = path.join(projectDirectory, ...file.path.split('/'));
+        await mkdir(path.dirname(destination), { recursive: true });
+        await writeFile(destination, file.content, 'utf8');
+      }
+
+      const protectedFile = path.join(projectDirectory, 'creator-files', 'keep.txt');
+      await mkdir(path.dirname(protectedFile), { recursive: true });
+      await writeFile(protectedFile, 'creator owned', 'utf8');
+      await expect(
+        buildProjectDirectory({
+          projectDirectory,
+          output: 'creator-files',
+          targets: ['web-single'],
+        }),
+      ).rejects.toThrow(/not build output owned/u);
+      expect(await readFile(protectedFile, 'utf8')).toBe('creator owned');
+
+      const first = await buildProjectDirectory({
+        projectDirectory,
+        output: 'release',
+        targets: ['web-single'],
+        profile: 'release',
+      });
+      expect(first.build.profile).toBe('release');
+      const htmlPath = path.join(first.outputDirectory, 'web', 'the-road-between-0.1.0.html');
+      const successfulHtml = await readFile(htmlPath, 'utf8');
+
+      const stalePath = path.join(first.outputDirectory, 'stale.txt');
+      await writeFile(stalePath, 'old output', 'utf8');
+      const second = await buildProjectDirectory({
+        projectDirectory,
+        output: 'release',
+        targets: ['web-single'],
+      });
+      expect(second.build.gameBundleHash).toBe(first.build.gameBundleHash);
+      await expect(access(stalePath)).rejects.toThrow();
+      await expect(access(`${first.outputDirectory}.rpgne-lock`)).rejects.toThrow();
+      await expect(access(`${first.outputDirectory}.rpgne-staging`)).rejects.toThrow();
+
+      const openingPath = path.join(projectDirectory, 'story', 'opening.story');
+      const opening = await readFile(openingPath, 'utf8');
+      await writeFile(openingPath, `${opening}\n* Break the build -> missing.scene\n`, 'utf8');
+      await expect(
+        buildProjectDirectory({
+          projectDirectory,
+          output: 'release',
+          targets: ['web-single'],
+        }),
+      ).rejects.toThrow();
+      expect(await readFile(htmlPath, 'utf8')).toBe(successfulHtml);
+    } finally {
+      await rm(projectDirectory, { recursive: true, force: true });
+    }
   });
 });

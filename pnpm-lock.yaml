@@ -118,7 +118,18 @@ importers:
         specifier: workspace:*
         version: link:../project
 
-  packages/cli: {}
+  packages/cli:
+    dependencies:
+      '@rpgnarrativeengine/build':
+        specifier: workspace:*
+        version: link:../build
+      '@rpgnarrativeengine/project':
+        specifier: workspace:*
+        version: link:../project
+    devDependencies:
+      '@types/node':
+        specifier: 24.13.3
+        version: 24.13.3
 
   packages/compiler:
     dependencies:

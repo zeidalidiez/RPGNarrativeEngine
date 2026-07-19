@@ -8,6 +8,7 @@ export default tseslint.config(
     ignores: [
       '**/.cache/**',
       '**/build/**',
+      '!packages/build/',
       '!packages/build/src/**',
       '**/coverage/**',
       '**/dist/**',

@@ -18,6 +18,8 @@ import {
 export const ENGINE_VERSION = '0.0.0';
 
 export type WebBuildTarget = 'web' | 'web-single' | 'web-zip';
+export type BuildTarget = 'bundle' | WebBuildTarget;
+export type BuildProfile = 'development' | 'release';
 export type BuildPhase = 'compile' | 'complete' | 'export' | 'validate';
 
 export interface BuildProgressEvent {
@@ -34,7 +36,9 @@ export interface BuildCancellationSignal {
 export interface BuildProjectRequest {
   readonly files: readonly ProjectFileInput[];
   /** Explicit one-run targets. Omit to use project.toml without rewriting it. */
-  readonly targets?: readonly WebBuildTarget[];
+  readonly targets?: readonly BuildTarget[];
+  /** Explicit one-run profile. Omit to use project.toml without rewriting it. */
+  readonly profile?: BuildProfile;
   readonly signal?: BuildCancellationSignal;
   readonly onProgress?: (event: BuildProgressEvent) => void;
 }
@@ -67,7 +71,8 @@ export type BuildArtifact = BuildFileArtifact | BuildFolderArtifact;
 
 export interface BuildProjectResult {
   readonly project: ProjectManifest;
-  readonly targets: readonly WebBuildTarget[];
+  readonly profile: BuildProfile;
+  readonly targets: readonly BuildTarget[];
   readonly gameBundleHash: string;
   readonly artifacts: readonly BuildArtifact[];
   /** Complete canonical build-directory contents for filesystem hosts. */
@@ -92,6 +97,7 @@ export class BuildCancelledError extends Error {
 }
 
 const webTargets = new Set<WebBuildTarget>(['web', 'web-single', 'web-zip']);
+const buildTargets = new Set<BuildTarget>(['bundle', ...webTargets]);
 
 function emit(request: BuildProjectRequest, event: BuildProgressEvent): void {
   request.onProgress?.(Object.freeze(event));
@@ -114,18 +120,18 @@ export function configuredWebBuildTargets(manifest: ProjectManifest): readonly W
 function selectedTargets(
   request: BuildProjectRequest,
   manifest: ProjectManifest,
-): readonly WebBuildTarget[] {
+): readonly BuildTarget[] {
   const selected = request.targets ?? configuredWebBuildTargets(manifest);
-  const unique = new Set<WebBuildTarget>();
+  const unique = new Set<BuildTarget>();
   for (const target of selected) {
-    if (!webTargets.has(target)) {
-      throw new BuildConfigurationError(`Unsupported web build target ${JSON.stringify(target)}.`);
+    if (!buildTargets.has(target)) {
+      throw new BuildConfigurationError(`Unsupported build target ${JSON.stringify(target)}.`);
     }
     unique.add(target);
   }
   if (unique.size === 0) {
     throw new BuildConfigurationError(
-      'No web build target is selected. Enable web, web-zip, or web-single.',
+      'No build target is selected. Enable bundle, web, web-zip, or web-single.',
     );
   }
   return Object.freeze([...unique]);
@@ -166,6 +172,7 @@ function manifestEntry(
   artifact: BuildArtifact,
   manifest: ProjectManifest,
   gameBundleHash: string,
+  profile: BuildProfile,
 ): ArtifactManifestEntry {
   const mimeType = artifact.kind === 'folder' ? 'inode/directory' : artifact.file.mimeType;
   const size = artifact.kind === 'folder' ? artifact.size : artifact.file.size;
@@ -182,7 +189,7 @@ function manifestEntry(
     projectId: manifest.project.id,
     projectVersion: manifest.project.version,
     engineVersion: ENGINE_VERSION,
-    profile: manifest.build.profile,
+    profile,
     signing: 'not-applicable',
     runnable: artifact.runnable,
   });
@@ -201,6 +208,7 @@ export async function buildWebProject(request: BuildProjectRequest): Promise<Bui
   emit(request, { phase: 'validate', progress: 0.05, message: 'Validating project files' });
   const loaded = loadNarrativeProject(request.files);
   const targets = selectedTargets(request, loaded.manifest);
+  const profile = request.profile ?? loaded.manifest.build.profile;
 
   checkCancellation(request);
   emit(request, { phase: 'compile', progress: 0.2, message: 'Compiling story sources' });
@@ -321,10 +329,10 @@ export async function buildWebProject(request: BuildProjectRequest): Promise<Bui
       schema: 1,
       project: { id: metadata.projectId, title: metadata.title, version: metadata.version },
       engineVersion: ENGINE_VERSION,
-      profile: loaded.manifest.build.profile,
+      profile,
       gameBundleHash,
       artifacts: artifacts.map((artifact) =>
-        manifestEntry(artifact, loaded.manifest, gameBundleHash),
+        manifestEntry(artifact, loaded.manifest, gameBundleHash, profile),
       ),
     },
     null,
@@ -342,7 +350,7 @@ export async function buildWebProject(request: BuildProjectRequest): Promise<Bui
       status: 'succeeded',
       projectId: metadata.projectId,
       projectVersion: metadata.version,
-      profile: loaded.manifest.build.profile,
+      profile,
       targets,
       storyFiles: loaded.storyFiles.map(({ path }) => path),
       sceneCount: Object.keys(game.scenes).length,
@@ -367,6 +375,7 @@ export async function buildWebProject(request: BuildProjectRequest): Promise<Bui
   emit(request, { phase: 'complete', progress: 1, message: 'Build complete' });
   return Object.freeze({
     project: loaded.manifest,
+    profile,
     targets,
     gameBundleHash,
     artifacts: Object.freeze(artifacts),

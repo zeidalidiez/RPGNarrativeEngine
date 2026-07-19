@@ -24,6 +24,7 @@
     "policy": "pnpm policy:boundaries && pnpm policy:no-electron",
     "policy:boundaries": "node scripts/check-boundaries.mjs",
     "policy:no-electron": "node scripts/check-no-electron.mjs",
+    "rpgne": "pnpm --filter @rpgnarrativeengine/cli... build && node packages/cli/dist/bin.js",
     "sbom": "node scripts/dependency-inventory.mjs sbom",
     "size": "node scripts/report-sizes.mjs",
     "test": "vitest run",
