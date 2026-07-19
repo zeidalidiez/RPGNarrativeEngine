@@ -9,10 +9,13 @@ This file is the current implementation map for AI agents and human contributors
 The repository now has a runnable browser-game path in addition to its contracts and parser:
 
 - `@rpgnarrativeengine/compiler` lowers normalized story ASTs into the versioned types owned by `@rpgnarrativeengine/ir`. It compiles narration/dialogue and safe inline content, expressions, conditionals, adjacent choice groups, `@set`, `@goto`, `@call`, `@return`, and `@ending`. Other commands are retained as host effects. Compilation rejects malformed command arguments, duplicate scenes, invalid start scenes, and missing scene references.
+- `@rpgnarrativeengine/project` parses full TOML with pinned `smol-toml`, validates the stable project identity, exact version, entry scene, locale, story globs, distribution/player/feature/build settings, rejects absolute/traversing paths, finds a single selected `project.toml`, removes a browser directory-selection prefix, de-duplicates paths, and returns matching `.story` files in Unicode-code-point path order. `[story].files` supports path segments, `*`, `**`, and `?`; broader shell expansion syntax is rejected explicitly.
+- `compileStoryProject` compiles those ordered files into one project-global scene graph. Syntax and command issues retain their source path; cross-file duplicate scenes and broken references fail together instead of being hidden by file boundaries. The original `compileStory` remains the single-source convenience API used by the scratchpad.
 - `@rpgnarrativeengine/runtime` is a deterministic, DOM-independent interpreter. It owns flat dotted-path narrative variables, strict expression evaluation, nested instruction frames, scene call continuations, conditional/choice execution, state mutation, effect dispatch, explicit and natural completion, restart, and a small player-facing view union. It uses an execution budget to stop non-yielding loops.
 - `@rpgnarrativeengine/player` mounts an accessible browser player with no framework dependency. It creates semantic DOM without `innerHTML`, renders the supported rich-text nodes, exposes native-button choices/continue/restart controls, focuses the active control, and reports runtime failures inside the player.
 - `examples/showcase/story/lighthouse.story` is a seven-scene reference story exercising dialogue, interpolation, state, choice conditions, branches, calls/returns, effects, transitions, and multiple endings. The Vite app compiles it from source in the browser and mounts the real player. Its production build uses relative asset URLs so the output can be served from a GitHub Pages project path.
 - `apps/playground` is a working creator-facing browser application. It edits plain `.story` source, persists it locally, imports and downloads story files, compiles on demand or with Ctrl/Cmd+Enter, mounts the production player for preview, reports scene count, and presents compiler issues as clickable line/column diagnostics that select the failing source range. It is a single-file scratchpad, not yet the canonical multi-file project editor.
+- `templates/first-story` is the first ordinary creator template and proves manifest entry-scene selection plus cross-file scene references. `examples/showcase/project.toml` makes the public demo a normal manifest-backed project even though its current Vite entry imports the story source directly.
 
 Build Stage 1 is implemented as a working repository foundation:
 
@@ -67,7 +70,7 @@ Dependencies are exact, not range-prefixed. Update them intentionally and commit
 
 - `contracts`: public primitives shared by multiple packages. It currently owns stable IDs, semantic versions and compatibility intervals, source locations, diagnostics, safe text-edit descriptions, their schemas, and their fixtures.
 - `language`: owns the story/expression grammar, CST/AST, formatting, and language services. It currently implements lexical contract helpers, executable expression primitives/metadata, the shared generated Lezer CST parser, the normalized expression AST/source mapper, and story/dialogue/safe-inline AST normalization. Command semantics, formatting, and higher language services remain pending.
-- `project`: project manifests, lockfiles, loaders, migrations, and paths.
+- `project`: currently owns typed `project.toml` parsing/validation, safe normalized paths, deterministic story glob discovery, and browser/host-neutral file loading. Lockfiles, asset catalogs, migrations, and filesystem adapters remain pending.
 - `ir`: currently owns the TypeScript shape of version-1 compiled games, expressions, inline content, scenes, choices, and instructions. JSON schema/readers/migrations remain pending.
 - `compiler`: currently parses and lowers a complete playable story into IR, validates scene references, and gives core flow commands executable meaning. Full project-aware resolution, typing, analysis, diagnostics, and module lowering remain pending.
 - `module-sdk`: first-party module lifecycle, transactions, events, and capabilities.
@@ -117,7 +120,7 @@ Ordinary generated build output belongs in `dist/`, `build/`, `coverage/`, `play
 
 Build outward from the working path rather than returning to contract-only work:
 
-1. Add the project manifest/loader so the compiler and playground can build a creator project instead of a single source string.
+1. Let the playground open a project directory, switch among its included story files, compile all sources, and route file-aware diagnostics back to the correct editor buffer.
 2. Add runtime save snapshots and deterministic RNG, then expose save/load in the player.
 3. Build shared export orchestration for the static web target and wire it to both CLI and GUI entry points.
 4. Move the working playground surfaces into the Tauri editor shell with filesystem-backed project open/save and source conflict handling.

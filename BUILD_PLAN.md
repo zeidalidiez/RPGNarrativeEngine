@@ -1209,7 +1209,7 @@ The following details are fixed to prevent divergent implementations.
 
 ### 11.1 Story file discovery
 
-- `project.toml` declares one or more ordered project-relative story globs.
+- `[story].files` in `project.toml` declares one or more ordered project-relative story globs using path segments plus `*`, `**`, and `?` matching.
 - Paths are normalized to `/`, deduplicated, and sorted by Unicode code point after normalization.
 - Scene IDs are project-global; filenames do not silently namespace them.
 - Includes/imports are compile-time organization only and do not execute at runtime.

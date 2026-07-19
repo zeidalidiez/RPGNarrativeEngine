@@ -22,13 +22,18 @@ export interface CompileIssue {
   readonly message: string;
   readonly from: number;
   readonly to: number;
+  readonly path?: string;
 }
 
 export class StoryCompileError extends Error {
   readonly issues: readonly CompileIssue[];
 
   constructor(issues: readonly CompileIssue[]) {
-    super(issues.map((issue) => issue.message).join('\n'));
+    super(
+      issues
+        .map((issue) => `${issue.path === undefined ? '' : `${issue.path}: `}${issue.message}`)
+        .join('\n'),
+    );
     this.name = 'StoryCompileError';
     this.issues = issues;
   }
@@ -39,14 +44,25 @@ export interface CompileStoryOptions {
   readonly startSceneId?: string;
 }
 
+export interface CompileStorySource {
+  readonly path: string;
+  readonly source: string;
+}
+
+interface CompileSequence {
+  value: number;
+}
+
 interface CompileContext {
   readonly issues: CompileIssue[];
   readonly references: Array<{
     readonly sceneId: string;
     readonly from: number;
     readonly to: number;
+    readonly path: string | null;
   }>;
-  choiceSequence: number;
+  readonly sequence: CompileSequence;
+  readonly path: string | null;
 }
 
 function compileExpression(expression: ExpressionAst): CompiledExpression {
@@ -114,7 +130,11 @@ function addIssue(
   to: number,
   code = 'invalid-command',
 ): void {
-  context.issues.push({ code, message, from, to });
+  context.issues.push(
+    context.path === null
+      ? { code, message, from, to }
+      : { code, message, from, to, path: context.path },
+  );
 }
 
 function parseCommandExpression(
@@ -152,6 +172,7 @@ function referenceInstruction(
     sceneId,
     from: command.argumentsSpan?.start.offset ?? command.headerSpan.start.offset,
     to: command.argumentsSpan?.end.offset ?? command.headerSpan.end.offset,
+    path: context.path,
   });
   return [{ kind, sceneId }];
 }
@@ -235,7 +256,7 @@ function compileCommand(command: StoryCommandAst, context: CompileContext): Comp
 
 function compileChoice(choice: StoryChoiceAst, context: CompileContext): CompiledChoiceOption {
   const id =
-    choice.contentId === null ? `choice-${++context.choiceSequence}` : String(choice.contentId);
+    choice.contentId === null ? `choice-${++context.sequence.value}` : String(choice.contentId);
   const instructions = compileItems(choice.body, context);
   if (choice.target !== null) {
     const sceneId = String(choice.target);
@@ -243,6 +264,7 @@ function compileChoice(choice: StoryChoiceAst, context: CompileContext): Compile
       sceneId,
       from: choice.targetSpan?.start.offset ?? choice.headerSpan.start.offset,
       to: choice.targetSpan?.end.offset ?? choice.headerSpan.end.offset,
+      path: context.path,
     });
     instructions.push({ kind: 'goto', sceneId });
   }
@@ -310,55 +332,107 @@ function compileItems(
   return instructions;
 }
 
-/** Compile prose-first `.story` source into the engine's serializable runtime format. */
-export function compileStory(source: string, options: CompileStoryOptions = {}): CompiledGame {
-  const parsed = parseStoryAst(source);
-  if (parsed.document === null) {
-    throw new StoryCompileError(parsed.issues);
-  }
+interface InternalStorySource {
+  readonly path: string | null;
+  readonly source: string;
+}
 
-  const context: CompileContext = { issues: [], references: [], choiceSequence: 0 };
+function compileSources(
+  sources: readonly InternalStorySource[],
+  options: CompileStoryOptions,
+): CompiledGame {
+  const issues: CompileIssue[] = [];
+  const references: CompileContext['references'] = [];
+  const sequence: CompileSequence = { value: 0 };
+  const documents: Array<{
+    readonly path: string | null;
+    readonly document: NonNullable<ReturnType<typeof parseStoryAst>['document']>;
+  }> = [];
+  const paths = new Set<string>();
+  for (const input of sources) {
+    if (input.path !== null) {
+      if (input.path.length === 0) {
+        issues.push({
+          code: 'invalid-source-path',
+          message: 'Compiled story source paths cannot be empty.',
+          from: 0,
+          to: 0,
+        });
+        continue;
+      }
+      if (paths.has(input.path)) {
+        issues.push({
+          code: 'duplicate-source-path',
+          message: `Story source path ${JSON.stringify(input.path)} was provided more than once.`,
+          from: 0,
+          to: 0,
+          path: input.path,
+        });
+        continue;
+      }
+      paths.add(input.path);
+    }
+    const parsed = parseStoryAst(input.source);
+    if (parsed.document === null) {
+      issues.push(
+        ...parsed.issues.map((current): CompileIssue =>
+          input.path === null ? { ...current } : { ...current, path: input.path },
+        ),
+      );
+    } else {
+      documents.push({ path: input.path, document: parsed.document });
+    }
+  }
+  if (issues.length > 0) throw new StoryCompileError(issues);
+
   const scenes: Record<string, CompiledScene> = {};
-  for (const scene of parsed.document.scenes) {
-    const id = String(scene.id);
-    if (scenes[id] !== undefined) {
-      addIssue(
-        context,
-        `Scene ${JSON.stringify(id)} is declared more than once.`,
-        scene.idSpan.start.offset,
-        scene.idSpan.end.offset,
-        'duplicate-scene',
-      );
-      continue;
+  let firstSceneId = '';
+  for (const entry of documents) {
+    const context: CompileContext = {
+      issues,
+      references,
+      sequence,
+      path: entry.path,
+    };
+    for (const scene of entry.document.scenes) {
+      const id = String(scene.id);
+      if (firstSceneId.length === 0) firstSceneId = id;
+      if (scenes[id] !== undefined) {
+        addIssue(
+          context,
+          `Scene ${JSON.stringify(id)} is declared more than once across the project.`,
+          scene.idSpan.start.offset,
+          scene.idSpan.end.offset,
+          'duplicate-scene',
+        );
+        continue;
+      }
+      scenes[id] = { id, instructions: compileItems(scene.items, context) };
     }
-    scenes[id] = { id, instructions: compileItems(scene.items, context) };
   }
 
-  const firstScene = parsed.document.scenes[0];
-  const startSceneId =
-    options.startSceneId ?? (firstScene === undefined ? '' : String(firstScene.id));
+  const startSceneId = options.startSceneId ?? firstSceneId;
   if (startSceneId.length === 0 || scenes[startSceneId] === undefined) {
-    addIssue(
-      context,
-      `Start scene ${JSON.stringify(startSceneId)} does not exist.`,
-      0,
-      0,
-      'missing-scene',
-    );
+    issues.push({
+      code: 'missing-scene',
+      message: `Start scene ${JSON.stringify(startSceneId)} does not exist.`,
+      to: 0,
+      from: 0,
+    });
   }
-  for (const reference of context.references) {
+  for (const reference of references) {
     if (scenes[reference.sceneId] === undefined) {
-      addIssue(
-        context,
-        `Referenced scene ${JSON.stringify(reference.sceneId)} does not exist.`,
-        reference.from,
-        reference.to,
-        'missing-scene',
-      );
+      issues.push({
+        code: 'missing-scene',
+        message: `Referenced scene ${JSON.stringify(reference.sceneId)} does not exist.`,
+        from: reference.from,
+        to: reference.to,
+        ...(reference.path === null ? {} : { path: reference.path }),
+      });
     }
   }
-  if (context.issues.length > 0) {
-    throw new StoryCompileError(context.issues);
+  if (issues.length > 0) {
+    throw new StoryCompileError(issues);
   }
 
   return {
@@ -368,4 +442,17 @@ export function compileStory(source: string, options: CompileStoryOptions = {}):
     startSceneId,
     scenes,
   };
+}
+
+/** Compile one prose-first `.story` source into the engine's serializable runtime format. */
+export function compileStory(source: string, options: CompileStoryOptions = {}): CompiledGame {
+  return compileSources([{ path: null, source }], options);
+}
+
+/** Compile canonically ordered story files into one project-global scene graph and game payload. */
+export function compileStoryProject(
+  sources: readonly CompileStorySource[],
+  options: CompileStoryOptions = {},
+): CompiledGame {
+  return compileSources(sources, options);
 }

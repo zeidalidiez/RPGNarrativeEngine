@@ -6,7 +6,7 @@ The editor will use Tauri 2. Electron is not and will not be part of this projec
 
 ## Current status
 
-The first complete playable path now works. A `.story` file is parsed and compiled into a serializable, platform-neutral instruction format; the headless runtime executes state changes, expressions, branches, calls, choices, effects, scene transitions, and endings; and the browser player renders the result with safe semantic DOM. `examples/showcase` contains a real branching story, **The Light at Brinewatch**, which is compiled in the browser and can be built as a static GitHub Pages site. `apps/playground` provides a creator-facing browser workspace for editing, opening, downloading, compiling, diagnosing, and playing `.story` source without a terminal. The repository foundation, strict TypeScript toolchain, focused Linux CI, package policies, stable IDs, diagnostics, Lezer parser, normalized story/expression ASTs, and safe inline text are also implemented. The project loader, save system, full desktop authoring workspaces, and packaged-game exporters remain to be built.
+The first complete playable path now works. A creator `project.toml` is validated into a typed manifest, its `[story].files` globs safely discover canonically ordered story sources, and those files compile together into a serializable, platform-neutral instruction format with project-wide scene/reference validation. The headless runtime executes state changes, expressions, branches, calls, choices, effects, scene transitions, and endings; and the browser player renders the result with safe semantic DOM. `templates/first-story` is a working two-file starter project. `examples/showcase` contains the manifest-backed branching story **The Light at Brinewatch**, which can be built as a static GitHub Pages site. `apps/playground` provides a creator-facing browser workspace for editing, opening, downloading, compiling, diagnosing, and playing `.story` source without a terminal. Save data, full desktop authoring workspaces, and packaged-game exporters remain to be built.
 
 The complete intended product is documented in:
 
@@ -58,7 +58,7 @@ pnpm run sbom
 - `packages/` contains narrowly owned engine, compiler, runtime, player, exporter, SDK, and tooling packages.
 - `modules/` contains opt-in first-party RPG systems.
 - `examples/showcase/` contains the playable public reference game and its static-site build.
-- `templates/` will contain creator project templates and the generated Tauri game shell.
+- `templates/` contains the working First Story creator project; additional project templates and the generated Tauri game shell remain planned.
 - `tests/` contains unit, integration, end-to-end, accessibility, determinism, and conformance suites.
 - `docs/` contains contracts, architecture decisions, and authoring/implementation documentation.
 

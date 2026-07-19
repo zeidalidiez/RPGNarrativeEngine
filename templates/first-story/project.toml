@@ -1,0 +1,31 @@
+schema = 1
+
+[project]
+id = "org.example.first-story"
+title = "The Road Between"
+version = "0.1.0"
+entry_scene = "crossroads.arrival"
+default_locale = "en"
+
+[story]
+files = ["story/**/*.story"]
+
+[distribution]
+slug = "the-road-between"
+publisher = "Your Name"
+license = "All-Rights-Reserved"
+
+[player]
+history = true
+saves = true
+skip_mode = "read-only"
+
+[build]
+output = "build"
+profile = "development"
+targets = ["web", "web-single"]
+
+[build.web]
+base_path = "./"
+zip = true
+single_html = true

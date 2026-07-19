@@ -1,0 +1,29 @@
+schema = 1
+
+[project]
+id = "org.rpgnarrativeengine.brinewatch"
+title = "The Light at Brinewatch"
+version = "0.1.0"
+entry_scene = "brinewatch.arrival"
+default_locale = "en"
+
+[story]
+files = ["story/**/*.story"]
+
+[distribution]
+slug = "light-at-brinewatch"
+publisher = "RPG Narrative Engine contributors"
+license = "MIT"
+
+[player]
+history = true
+saves = true
+skip_mode = "read-only"
+
+[build]
+output = "build"
+profile = "release"
+targets = ["web"]
+
+[build.web]
+base_path = "./"

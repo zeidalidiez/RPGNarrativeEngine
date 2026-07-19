@@ -1004,6 +1004,9 @@ version = "0.1.0"
 entry_scene = "station.arrival"
 default_locale = "en"
 
+[story]
+files = ["story/**/*.story"]
+
 [distribution]
 slug = "last-station"
 publisher = "Example Creator"

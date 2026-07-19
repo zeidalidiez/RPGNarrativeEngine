@@ -15,6 +15,10 @@
   "files": [
     "dist"
   ],
+  "dependencies": {
+    "@rpgnarrativeengine/contracts": "workspace:*",
+    "smol-toml": "1.7.0"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "tsc -b tsconfig.json --clean",
