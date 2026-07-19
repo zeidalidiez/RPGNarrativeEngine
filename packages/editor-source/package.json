@@ -7,6 +7,7 @@
   "type": "module",
   "sideEffects": false,
   "dependencies": {
+    "@rpgnarrativeengine/contracts": "workspace:*",
     "@rpgnarrativeengine/language": "workspace:*"
   },
   "exports": {

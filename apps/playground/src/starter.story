@@ -24,7 +24,7 @@ The bells belong to a half-sunken shrine. In its doorway, a small blue flame bur
 :: crossroads.ridge
 
 @if heard_bells
-  The shrine's flame leans toward the mountain, revealing letters cut into the rock: **Only the willing road opens.**
+  \The shrine's flame leans toward the mountain, revealing letters cut into the rock: **Only the willing road opens.**
 @else
   Wind scours the empty ridge. Far below, bells ring once and then fall silent.
 @end

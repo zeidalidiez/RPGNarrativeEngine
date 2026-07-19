@@ -2,6 +2,7 @@ import {
   applyStorySourceEdit,
   parseEditableStory,
   StorySourceEditError,
+  type ExpressionAst,
   type StoryChoiceAst,
   type StoryCommandAst,
   type StoryConditionalAst,
@@ -19,6 +20,7 @@ export interface StructuredEditorFile {
 export interface StructuredEditorHost {
   readonly files: () => readonly StructuredEditorFile[];
   readonly updateFile: (path: string, source: string) => void;
+  readonly renameScene: (from: string, to: string) => void;
   readonly selectFile: (path: string) => void;
   readonly openAdvancedSource: (path: string, from?: number, to?: number) => void;
   readonly preview: () => void;
@@ -32,6 +34,7 @@ export interface StructuredEditorElements {
   readonly addNarration: HTMLButtonElement;
   readonly addDialogue: HTMLButtonElement;
   readonly addChoice: HTMLButtonElement;
+  readonly addCondition: HTMLButtonElement;
   readonly addState: HTMLButtonElement;
   readonly addEnding: HTMLButtonElement;
 }
@@ -48,7 +51,38 @@ interface SceneSelection {
 }
 
 type EditableStoryItem = Exclude<StoryItemAst, { readonly kind: 'trivia' }>;
-type NewItemKind = 'choice' | 'dialogue' | 'ending' | 'narration' | 'state';
+type NewItemKind = 'choice' | 'condition' | 'dialogue' | 'ending' | 'narration' | 'state';
+
+type ConditionRule =
+  | 'advanced'
+  | 'always'
+  | 'eq-false'
+  | 'eq-number'
+  | 'eq-text'
+  | 'eq-true'
+  | 'eq-variable'
+  | 'falsy'
+  | 'gte-number'
+  | 'gt-number'
+  | 'lte-number'
+  | 'lt-number'
+  | 'neq-false'
+  | 'neq-number'
+  | 'neq-text'
+  | 'neq-true'
+  | 'neq-variable'
+  | 'truthy';
+
+interface ConditionState {
+  readonly rule: ConditionRule;
+  readonly variable: string;
+  readonly value: string;
+}
+
+interface ConditionControl {
+  readonly element: HTMLElement;
+  readonly value: () => string;
+}
 
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -110,6 +144,193 @@ function textarea(value: string): HTMLTextAreaElement {
   result.rows = Math.max(3, Math.min(8, value.split(/\r\n|\r|\n/u).length + 1));
   result.value = value;
   return result;
+}
+
+function variablePath(value: string, label = 'Variable'): string {
+  const normalized = value.trim();
+  if (!/^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*$/u.test(normalized)) {
+    throw new StorySourceEditError(
+      `${label} names use lowercase letters, digits, underscores, and dot-separated fields.`,
+    );
+  }
+  return normalized;
+}
+
+function conditionState(
+  source: string,
+  expression: ExpressionAst | null,
+  allowAlways: boolean,
+): ConditionState {
+  if (expression === null) {
+    return { rule: allowAlways ? 'always' : 'advanced', variable: '', value: '' };
+  }
+  const current = expression.kind === 'group' ? expression.expression : expression;
+  if (current.kind === 'variable') {
+    return { rule: 'truthy', variable: String(current.path), value: '' };
+  }
+  if (current.kind === 'unary' && current.operator === '!' && current.operand.kind === 'variable') {
+    return { rule: 'falsy', variable: String(current.operand.path), value: '' };
+  }
+  if (
+    current.kind === 'binary' &&
+    current.left.kind === 'variable' &&
+    ['!=', '<', '<=', '==', '>', '>='].includes(current.operator)
+  ) {
+    const variable = String(current.left.path);
+    if (current.right.kind === 'string-literal' && ['!=', '=='].includes(current.operator)) {
+      return {
+        rule: current.operator === '==' ? 'eq-text' : 'neq-text',
+        variable,
+        value: current.right.value,
+      };
+    }
+    if (current.right.kind === 'number-literal') {
+      const prefix =
+        current.operator === '=='
+          ? 'eq'
+          : current.operator === '!='
+            ? 'neq'
+            : current.operator === '<'
+              ? 'lt'
+              : current.operator === '<='
+                ? 'lte'
+                : current.operator === '>'
+                  ? 'gt'
+                  : 'gte';
+      return { rule: `${prefix}-number` as ConditionRule, variable, value: current.right.raw };
+    }
+    if (current.right.kind === 'boolean-literal' && ['!=', '=='].includes(current.operator)) {
+      const equality = current.operator === '==' ? 'eq' : 'neq';
+      return {
+        rule: `${equality}-${current.right.value ? 'true' : 'false'}` as ConditionRule,
+        variable,
+        value: '',
+      };
+    }
+    if (current.right.kind === 'variable' && ['!=', '=='].includes(current.operator)) {
+      return {
+        rule: current.operator === '==' ? 'eq-variable' : 'neq-variable',
+        variable,
+        value: String(current.right.path),
+      };
+    }
+  }
+  return {
+    rule: 'advanced',
+    variable: '',
+    value: spanValue(source, expression.span),
+  };
+}
+
+const CONDITION_OPTIONS: readonly { readonly value: ConditionRule; readonly label: string }[] = [
+  { value: 'always', label: 'Always available' },
+  { value: 'truthy', label: 'Variable is true' },
+  { value: 'falsy', label: 'Variable is false' },
+  { value: 'eq-text', label: 'Variable equals text' },
+  { value: 'neq-text', label: 'Variable does not equal text' },
+  { value: 'eq-number', label: 'Variable equals number' },
+  { value: 'neq-number', label: 'Variable does not equal number' },
+  { value: 'lt-number', label: 'Variable is less than number' },
+  { value: 'lte-number', label: 'Variable is at most number' },
+  { value: 'gt-number', label: 'Variable is greater than number' },
+  { value: 'gte-number', label: 'Variable is at least number' },
+  { value: 'eq-true', label: 'Variable strictly equals true' },
+  { value: 'eq-false', label: 'Variable strictly equals false' },
+  { value: 'neq-true', label: 'Variable does not equal true' },
+  { value: 'neq-false', label: 'Variable does not equal false' },
+  { value: 'eq-variable', label: 'Variable equals another variable' },
+  { value: 'neq-variable', label: 'Variable differs from another variable' },
+  { value: 'advanced', label: 'Advanced expression' },
+];
+
+function conditionControl(
+  source: string,
+  expression: ExpressionAst | null,
+  allowAlways: boolean,
+): ConditionControl {
+  const initial = conditionState(source, expression, allowAlways);
+  const wrapper = element('div', 'condition-builder');
+  const rule = element('select');
+  for (const descriptor of CONDITION_OPTIONS) {
+    if (!allowAlways && descriptor.value === 'always') continue;
+    const option = element('option');
+    option.value = descriptor.value;
+    option.textContent = descriptor.label;
+    option.selected = descriptor.value === initial.rule;
+    rule.append(option);
+  }
+  const variable = input(initial.variable);
+  variable.placeholder = 'story.flag';
+  const value = input(initial.value);
+  const variableField = field('Variable', variable);
+  const valueField = field('Comparison value', value);
+  const note = element('p', 'scene-card-note');
+  const refresh = (): void => {
+    const selected = rule.value as ConditionRule;
+    variableField.hidden = selected === 'always' || selected === 'advanced';
+    valueField.hidden =
+      selected === 'always' ||
+      selected === 'truthy' ||
+      selected === 'falsy' ||
+      selected.endsWith('-true') ||
+      selected.endsWith('-false');
+    note.hidden = selected !== 'advanced';
+    if (selected.endsWith('-text')) value.placeholder = 'Player-facing text';
+    else if (selected.endsWith('-number')) value.placeholder = '2';
+    else if (selected.endsWith('-variable')) value.placeholder = 'other.value';
+    else if (selected === 'advanced') value.placeholder = 'flag && score >= 2';
+  };
+  note.textContent =
+    'This existing rule is more complex than the guided fields. It remains editable here and is never discarded.';
+  rule.addEventListener('change', refresh);
+  wrapper.append(field('Rule', rule), variableField, valueField, note);
+  refresh();
+
+  return {
+    element: wrapper,
+    value() {
+      const selected = rule.value as ConditionRule;
+      if (selected === 'always') return allowAlways ? '' : 'true';
+      if (selected === 'advanced') {
+        const advanced = value.value.trim();
+        if (advanced.length === 0 || /[\r\n]/u.test(advanced)) {
+          throw new StorySourceEditError('An advanced rule must be one nonempty line.');
+        }
+        return advanced;
+      }
+      const left = variablePath(variable.value);
+      if (selected === 'truthy') return left;
+      if (selected === 'falsy') return `!${left}`;
+      if (selected.endsWith('-true') || selected.endsWith('-false')) {
+        const operator = selected.startsWith('neq-') ? '!=' : '==';
+        return `${left} ${operator} ${selected.endsWith('-true') ? 'true' : 'false'}`;
+      }
+      if (selected.endsWith('-text')) {
+        const operator = selected.startsWith('neq-') ? '!=' : '==';
+        return `${left} ${operator} ${JSON.stringify(value.value)}`;
+      }
+      if (selected.endsWith('-variable')) {
+        const operator = selected.startsWith('neq-') ? '!=' : '==';
+        return `${left} ${operator} ${variablePath(value.value, 'Comparison variable')}`;
+      }
+      const number = value.value.trim();
+      if (!/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/u.test(number)) {
+        throw new StorySourceEditError('The comparison value must be a valid number.');
+      }
+      const operator = selected.startsWith('neq-')
+        ? '!='
+        : selected.startsWith('lt-')
+          ? '<'
+          : selected.startsWith('lte-')
+            ? '<='
+            : selected.startsWith('gt-')
+              ? '>'
+              : selected.startsWith('gte-')
+                ? '>='
+                : '==';
+      return `${left} ${operator} ${number}`;
+    },
+  };
 }
 
 function formLines(value: string): string[] {
@@ -181,11 +402,16 @@ function serializeText(
   if (contentId.length > 0) lines[lines.length - 1] = `${lines.at(-1)} ^${contentId}`;
   const newline = newlineFor(source);
   const raw = spanValue(source, item.span);
-  return `${lines.map((line, index) => (index === 0 ? line : `  ${line}`)).join(newline)}${lineTerminator(raw, newline)}`;
+  const continuationIndent = ' '.repeat(item.span.start.column + 1);
+  return `${lines.map((line, index) => (index === 0 ? line : `${continuationIndent}${line}`)).join(newline)}${lineTerminator(raw, newline)}`;
 }
 
-function choiceCondition(source: string, item: StoryChoiceAst): string {
-  return item.conditionSpan === null ? '' : spanValue(source, item.conditionSpan);
+function itemIndent(item: EditableStoryItem): string {
+  return ' '.repeat(Math.max(0, item.span.start.column - 1));
+}
+
+function itemLineStart(item: EditableStoryItem): number {
+  return item.span.start.offset - Math.max(0, item.span.start.column - 1);
 }
 
 function serializeChoiceHeader(
@@ -237,8 +463,15 @@ export class StructuredSceneEditor {
     elements.addNarration.addEventListener('click', () => this.appendItem('narration'));
     elements.addDialogue.addEventListener('click', () => this.appendItem('dialogue'));
     elements.addChoice.addEventListener('click', () => this.appendItem('choice'));
+    elements.addCondition.addEventListener('click', () => this.appendItem('condition'));
     elements.addState.addEventListener('click', () => this.appendItem('state'));
     elements.addEnding.addEventListener('click', () => this.appendItem('ending'));
+  }
+
+  selectScene(path: string, sceneId: string): void {
+    this.selection = { path, sceneId };
+    this.host.selectFile(path);
+    this.refresh(this.selection);
   }
 
   refresh(preferred: SceneSelection | null = this.selection): void {
@@ -294,6 +527,7 @@ export class StructuredSceneEditor {
     this.elements.addNarration.disabled = !enabled;
     this.elements.addDialogue.disabled = !enabled;
     this.elements.addChoice.disabled = !enabled;
+    this.elements.addCondition.disabled = !enabled;
     this.elements.addState.disabled = !enabled;
     this.elements.addEnding.disabled = !enabled;
     this.elements.newScene.disabled = this.parsedFiles.length === 0;
@@ -371,6 +605,11 @@ export class StructuredSceneEditor {
     const title = element('h3');
     title.textContent = String(selected.scene.id);
     identity.append(kicker, title);
+    const headerActions = element('div', 'scene-header-actions');
+    const renameButton = textButton('Rename scene', 'button button-subtle scene-source-button');
+    renameButton.addEventListener('click', () =>
+      this.openRenameSceneDialog(String(selected.scene.id)),
+    );
     const sourceButton = textButton('Advanced source', 'button button-subtle scene-source-button');
     sourceButton.addEventListener('click', () =>
       this.host.openAdvancedSource(
@@ -379,7 +618,8 @@ export class StructuredSceneEditor {
         selected.scene.span.end.offset,
       ),
     );
-    header.append(identity, sourceButton);
+    headerActions.append(renameButton, sourceButton);
+    header.append(identity, headerActions);
     this.elements.canvas.append(header);
 
     const items = selected.scene.items.filter(
@@ -393,17 +633,24 @@ export class StructuredSceneEditor {
     }
     const stack = element('div', 'scene-card-stack');
     items.forEach((item, index) => {
-      const card =
-        item.kind === 'text'
-          ? this.renderTextCard(selected.record, item, items, index)
-          : item.kind === 'choice'
-            ? this.renderChoiceCard(selected.record, item, items, index)
-            : item.kind === 'command'
-              ? this.renderCommandCard(selected.record, item, items, index)
-              : this.renderConditionalCard(selected.record, item, items, index);
-      stack.append(card);
+      stack.append(this.renderItemCard(selected.record, item, items, index));
     });
     this.elements.canvas.append(stack);
+  }
+
+  private renderItemCard(
+    record: ParsedStoryFile,
+    item: EditableStoryItem,
+    items: readonly EditableStoryItem[],
+    index: number,
+  ): HTMLElement {
+    return item.kind === 'text'
+      ? this.renderTextCard(record, item, items, index)
+      : item.kind === 'choice'
+        ? this.renderChoiceCard(record, item, items, index)
+        : item.kind === 'command'
+          ? this.renderCommandCard(record, item, items, index)
+          : this.renderConditionalCard(record, item, items, index);
   }
 
   private cardShell(label: string, kind: string): HTMLElement {
@@ -500,13 +747,12 @@ export class StructuredSceneEditor {
     }
     target.value = item.target === null ? '' : String(item.target);
     target.disabled = item.body.length > 0;
-    const condition = input(choiceCondition(record.file.content, item));
-    condition.placeholder = 'Optional, for example trust >= 2';
+    const condition = conditionControl(record.file.content, item.condition, true);
     const contentId = input(item.contentId === null ? '' : String(item.contentId));
     form.append(
       field('Player-facing choice', label),
       field('Destination scene', target),
-      field('Show when', condition),
+      condition.element,
       field('Content ID', contentId),
     );
     if (item.body.length > 0) {
@@ -520,7 +766,7 @@ export class StructuredSceneEditor {
           item,
           label.value,
           target.value,
-          condition.value,
+          condition.value(),
           contentId.value,
         );
         this.applyEdit(
@@ -583,14 +829,73 @@ export class StructuredSceneEditor {
     index: number,
   ): HTMLElement {
     const card = this.cardShell('Condition', 'conditional');
-    const condition = element('p', 'condition-summary');
-    condition.textContent = spanValue(record.file.content, item.conditionSpan);
-    const detail = element('p', 'scene-card-note');
-    const branchCount = item.thenBranch.length + (item.elseBranch?.length ?? 0);
-    detail.textContent = `${branchCount} nested card${branchCount === 1 ? '' : 's'} preserved. Structured branch editing is the next condition-builder increment.`;
-    card.append(condition, detail);
-    card.append(this.cardActions(record, item, items, index));
+    const form = element('form', 'scene-card-form');
+    const condition = conditionControl(record.file.content, item.condition, false);
+    form.append(condition.element);
+    form.append(
+      this.cardActions(record, item, items, index, () => {
+        this.applyEdit(
+          record.file.path,
+          item.conditionSpan.start.offset,
+          item.conditionSpan.end.offset,
+          condition.value(),
+          'Condition rule updated.',
+        );
+      }),
+    );
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      form.querySelector<HTMLButtonElement>('[data-save-card="true"]')?.click();
+    });
+    card.append(form);
+    card.append(this.renderConditionalBranch(record, item, 'then'));
+    if (item.elseBranch === null) {
+      const addElse = textButton('+ Add otherwise branch', 'condition-add-else');
+      addElse.addEventListener('click', () =>
+        this.guardEdit(() => this.appendConditionalElse(record, item)),
+      );
+      card.append(addElse);
+    } else {
+      card.append(this.renderConditionalBranch(record, item, 'else'));
+    }
     return card;
+  }
+
+  private renderConditionalBranch(
+    record: ParsedStoryFile,
+    conditional: StoryConditionalAst,
+    branch: 'else' | 'then',
+  ): HTMLElement {
+    const sourceItems = branch === 'then' ? conditional.thenBranch : (conditional.elseBranch ?? []);
+    const items = sourceItems.filter((item): item is EditableStoryItem => item.kind !== 'trivia');
+    const section = element('section', 'condition-branch');
+    const header = element('header', 'condition-branch-header');
+    const title = element('h4');
+    title.textContent = branch === 'then' ? 'When true' : 'Otherwise';
+    const additions = element('div', 'condition-branch-additions');
+    for (const kind of [
+      'narration',
+      'dialogue',
+      'choice',
+      'state',
+      'condition',
+      'ending',
+    ] as const) {
+      const button = textButton(
+        `+ ${kind[0]!.toUpperCase()}${kind.slice(1)}`,
+        'condition-add-card',
+      );
+      button.addEventListener('click', () =>
+        this.appendBranchItem(record, conditional, branch, kind),
+      );
+      additions.append(button);
+    }
+    header.append(title, additions);
+    section.append(header);
+    const stack = element('div', 'condition-branch-stack');
+    items.forEach((item, index) => stack.append(this.renderItemCard(record, item, items, index)));
+    section.append(stack);
+    return section;
   }
 
   private cardActions(
@@ -625,7 +930,7 @@ export class StructuredSceneEditor {
           record.file.path,
           item.span.end.offset,
           item.span.end.offset,
-          raw,
+          `${itemIndent(item)}${raw}`,
           'Card duplicated.',
         );
       }),
@@ -635,12 +940,18 @@ export class StructuredSceneEditor {
       this.host.openAdvancedSource(record.file.path, item.span.start.offset, item.span.end.offset),
     );
     const remove = textButton('Remove', 'scene-action scene-action-danger');
+    const nestedLastItem = item.span.start.column > 1 && items.length === 1;
+    remove.disabled = nestedLastItem;
+    if (nestedLastItem) {
+      remove.title = 'A condition or inline-action branch must keep at least one card.';
+    }
     remove.addEventListener('click', () => {
+      if (nestedLastItem) return;
       if (!window.confirm('Remove this card from the scene?')) return;
       this.guardEdit(() =>
         this.applyEdit(
           record.file.path,
-          item.span.start.offset,
+          itemLineStart(item),
           item.span.end.offset,
           '',
           'Card removed.',
@@ -718,16 +1029,7 @@ export class StructuredSceneEditor {
         ({ scene }) => String(scene.id) !== String(selected.scene.id),
       )?.scene;
       const target = String(otherScene?.id ?? selected.scene.id);
-      const value =
-        kind === 'narration'
-          ? `New narration.${newline}`
-          : kind === 'dialogue'
-            ? `Speaker: New dialogue.${newline}`
-            : kind === 'choice'
-              ? `* Continue -> ${target}${newline}`
-              : kind === 'state'
-                ? `@set state.value = 0${newline}`
-                : `@ending ending "Ending"${newline}`;
+      const value = this.newItemSource(kind, newline, '', target);
       this.applyEdit(
         selected.record.file.path,
         insertion,
@@ -736,6 +1038,68 @@ export class StructuredSceneEditor {
         `${kind[0]!.toUpperCase()}${kind.slice(1)} card added.`,
       );
     });
+  }
+
+  private newItemSource(
+    kind: NewItemKind,
+    newline: '\n' | '\r\n',
+    baseIndent: string,
+    target: string,
+  ): string {
+    return kind === 'narration'
+      ? `New narration.${newline}`
+      : kind === 'dialogue'
+        ? `Speaker: New dialogue.${newline}`
+        : kind === 'choice'
+          ? `* Continue -> ${target}${newline}`
+          : kind === 'state'
+            ? `@set state.value = 0${newline}`
+            : kind === 'condition'
+              ? `@if state.flag${newline}${baseIndent}  New narration.${newline}${baseIndent}@end${newline}`
+              : `@ending ending "Ending"${newline}`;
+  }
+
+  private appendBranchItem(
+    record: ParsedStoryFile,
+    conditional: StoryConditionalAst,
+    branch: 'else' | 'then',
+    kind: NewItemKind,
+  ): void {
+    this.guardEdit(() => {
+      const sourceItems =
+        branch === 'then' ? conditional.thenBranch : (conditional.elseBranch ?? []);
+      const lastContentItem = [...sourceItems].reverse().find((item) => item.kind !== 'trivia');
+      if (lastContentItem === undefined) {
+        throw new StorySourceEditError('This branch has no insertion point.');
+      }
+      const newline = newlineFor(record.file.content);
+      const baseIndent = `${itemIndent(conditional)}  `;
+      const otherScene = this.allScenes().find(
+        ({ scene }) => String(scene.id) !== this.selection?.sceneId,
+      )?.scene;
+      const target = String(otherScene?.id ?? this.selection?.sceneId ?? 'scene.next');
+      const value = `${baseIndent}${this.newItemSource(kind, newline, baseIndent, target)}`;
+      this.applyEdit(
+        record.file.path,
+        lastContentItem.span.end.offset,
+        lastContentItem.span.end.offset,
+        value,
+        `${kind[0]!.toUpperCase()}${kind.slice(1)} card added to the ${branch === 'then' ? 'true' : 'otherwise'} branch.`,
+      );
+    });
+  }
+
+  private appendConditionalElse(record: ParsedStoryFile, conditional: StoryConditionalAst): void {
+    const newline = newlineFor(record.file.content);
+    const baseIndent = itemIndent(conditional);
+    const branchIndent = `${baseIndent}  `;
+    this.applyEdit(
+      record.file.path,
+      conditional.endSpan.start.offset,
+      conditional.endSpan.start.offset,
+      `@else${newline}${branchIndent}New narration.${newline}${baseIndent}`,
+      'Otherwise branch added.',
+    );
   }
 
   private openNewSceneDialog(): void {
@@ -798,6 +1162,44 @@ export class StructuredSceneEditor {
           `Scene ${id} created.`,
           { path: record.file.path, sceneId: id },
         );
+      });
+    });
+    dialog.showModal();
+    sceneId.focus();
+    sceneId.select();
+  }
+
+  private openRenameSceneDialog(currentId: string): void {
+    const dialog = element('dialog', 'new-scene-dialog');
+    const form = element('form', 'new-scene-form');
+    const title = element('h2');
+    title.textContent = 'Rename scene';
+    const sceneId = input(currentId);
+    sceneId.autocomplete = 'off';
+    const explanation = element('p', 'scene-dialog-copy');
+    explanation.textContent =
+      'The scene declaration, choices, jumps, calls, and project entry scene will update together.';
+    const actions = element('div', 'new-scene-actions');
+    const cancel = textButton('Cancel', 'button button-subtle');
+    const rename = element('button', 'button button-primary');
+    rename.type = 'submit';
+    rename.textContent = 'Rename scene';
+    actions.append(cancel, rename);
+    form.append(title, explanation, field('New scene ID', sceneId), actions);
+    dialog.append(form);
+    document.body.append(dialog);
+    cancel.addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove());
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.guardEdit(() => {
+        const nextId = sceneId.value.trim();
+        this.host.renameScene(currentId, nextId);
+        dialog.close();
+        this.selection = { path: this.selection?.path ?? '', sceneId: nextId };
+        this.refresh(this.selection);
+        this.host.preview();
+        this.setStatus(`Scene ${currentId} renamed to ${nextId}.`);
       });
     });
     dialog.showModal();

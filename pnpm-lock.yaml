@@ -147,6 +147,9 @@ importers:
 
   packages/editor-source:
     dependencies:
+      '@rpgnarrativeengine/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@rpgnarrativeengine/language':
         specifier: workspace:*
         version: link:../language

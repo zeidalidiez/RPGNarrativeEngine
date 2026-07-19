@@ -69,6 +69,16 @@
               Scene builder
             </button>
             <button
+              id="story-map-mode-button"
+              class="authoring-tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="story-map"
+            >
+              Story map
+            </button>
+            <button
               id="source-mode-button"
               class="authoring-tab"
               type="button"
@@ -98,12 +108,33 @@
                 <button id="add-narration-button" type="button">Narration</button>
                 <button id="add-dialogue-button" type="button">Dialogue</button>
                 <button id="add-choice-button" type="button">Choice</button>
+                <button id="add-condition-button" type="button">Condition</button>
                 <button id="add-state-button" type="button">State</button>
                 <button id="add-ending-button" type="button">Ending</button>
               </div>
               <p id="scene-builder-status" class="scene-builder-status" role="status"></p>
               <div id="scene-canvas" class="scene-canvas"></div>
             </section>
+          </div>
+          <div id="story-map" class="story-map" role="tabpanel" hidden>
+            <div class="story-map-toolbar">
+              <div>
+                <p class="pane-kicker">Visual story structure</p>
+                <p id="story-map-summary" class="story-map-summary"></p>
+              </div>
+              <div class="story-map-toolbar-actions">
+                <span class="story-map-legend story-map-legend-choice">Choice</span>
+                <span class="story-map-legend story-map-legend-goto">Jump</span>
+                <span class="story-map-legend story-map-legend-call">Call</span>
+                <button id="story-map-new-scene-button" class="scene-add-button" type="button">
+                  + Scene
+                </button>
+              </div>
+            </div>
+            <p id="story-map-status" class="story-map-status" role="status"></p>
+            <div class="story-map-viewport">
+              <div id="story-map-canvas" class="story-map-canvas"></div>
+            </div>
           </div>
           <div id="source-editor-wrap" class="editor-wrap" role="tabpanel" hidden>
             <label class="sr-only" for="story-source">Story source</label>

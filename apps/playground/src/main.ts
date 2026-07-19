@@ -11,6 +11,7 @@ import {
   StoryCompileError,
   type CompileIssue,
 } from '@rpgnarrativeengine/compiler';
+import { renameStoryScene } from '@rpgnarrativeengine/editor-source';
 import { mountNarrativePlayer, type NarrativePlayerController } from '@rpgnarrativeengine/player';
 import {
   loadNarrativeProject,
@@ -18,7 +19,9 @@ import {
   type ProjectFileInput,
 } from '@rpgnarrativeengine/project';
 
+import { renameProjectEntryScene } from './project-source.js';
 import starterStory from './starter.story?raw';
+import { StoryMapEditor, type StoryMapElements } from './story-map.js';
 import { StructuredSceneEditor, type StructuredEditorElements } from './structured-editor.js';
 import './style.css';
 
@@ -76,8 +79,10 @@ const buildResults = required<HTMLElement>('#build-results');
 const buildHash = required<HTMLElement>('#build-hash');
 const artifactList = required<HTMLElement>('#artifact-list');
 const visualModeButton = required<HTMLButtonElement>('#visual-mode-button');
+const storyMapModeButton = required<HTMLButtonElement>('#story-map-mode-button');
 const sourceModeButton = required<HTMLButtonElement>('#source-mode-button');
 const sceneBuilderRoot = required<HTMLElement>('#scene-builder');
+const storyMapRoot = required<HTMLElement>('#story-map');
 const sourceEditorWrap = required<HTMLElement>('#source-editor-wrap');
 const structuredEditorElements: StructuredEditorElements = {
   sceneList: required<HTMLElement>('#scene-list'),
@@ -87,15 +92,23 @@ const structuredEditorElements: StructuredEditorElements = {
   addNarration: required<HTMLButtonElement>('#add-narration-button'),
   addDialogue: required<HTMLButtonElement>('#add-dialogue-button'),
   addChoice: required<HTMLButtonElement>('#add-choice-button'),
+  addCondition: required<HTMLButtonElement>('#add-condition-button'),
   addState: required<HTMLButtonElement>('#add-state-button'),
   addEnding: required<HTMLButtonElement>('#add-ending-button'),
+};
+const storyMapElements: StoryMapElements = {
+  canvas: required<HTMLElement>('#story-map-canvas'),
+  newScene: required<HTMLButtonElement>('#story-map-new-scene-button'),
+  status: required<HTMLElement>('#story-map-status'),
+  summary: required<HTMLElement>('#story-map-summary'),
 };
 
 let controller: NarrativePlayerController | null = null;
 let session: EditorSession;
 let activePath = '';
 let structuredEditor: StructuredSceneEditor | null = null;
-let authoringMode: 'source' | 'visual' = 'visual';
+let storyMap: StoryMapEditor | null = null;
+let authoringMode: 'map' | 'source' | 'visual' = 'visual';
 
 function savedSource(): string {
   try {
@@ -135,19 +148,27 @@ function updateStats(): void {
   sourceStats.textContent = `${lineCount} ${lineCount === 1 ? 'line' : 'lines'} \u00b7 ${editor.value.length} characters${fileCount > 1 ? ` \u00b7 ${fileCount} files` : ''}`;
 }
 
-function setAuthoringMode(mode: 'source' | 'visual'): void {
+function setAuthoringMode(mode: 'map' | 'source' | 'visual'): void {
   authoringMode = mode;
   const visual = mode === 'visual';
+  const map = mode === 'map';
+  const source = mode === 'source';
   sceneBuilderRoot.hidden = !visual;
-  sourceEditorWrap.hidden = visual;
+  storyMapRoot.hidden = !map;
+  sourceEditorWrap.hidden = !source;
   visualModeButton.classList.toggle('authoring-tab-active', visual);
-  sourceModeButton.classList.toggle('authoring-tab-active', !visual);
+  storyMapModeButton.classList.toggle('authoring-tab-active', map);
+  sourceModeButton.classList.toggle('authoring-tab-active', source);
   visualModeButton.setAttribute('aria-selected', String(visual));
-  sourceModeButton.setAttribute('aria-selected', String(!visual));
+  storyMapModeButton.setAttribute('aria-selected', String(map));
+  sourceModeButton.setAttribute('aria-selected', String(source));
   editorHint.textContent = visual
     ? 'Visual changes update the same portable story files.'
-    : 'Ctrl/⌘ + Enter runs the current project.';
+    : map
+      ? 'Connections and scene refactors update the same portable story files.'
+      : 'Ctrl/⌘ + Enter runs the current project.';
   if (visual) structuredEditor?.refresh();
+  if (map) storyMap?.refresh();
 }
 
 function markBuildStale(): void {
@@ -184,19 +205,50 @@ function activateFile(path: string, focus = false): void {
   editor.scrollTop = 0;
   updateStats();
   structuredEditor?.refresh();
+  storyMap?.refresh();
   if (focus) editor.focus();
 }
 
 function updateStructuredFile(path: string, source: string): void {
-  const file = session.files.find((candidate) => candidate.path === path);
-  if (file === undefined) throw new Error(`Story file ${JSON.stringify(path)} is not open.`);
-  file.content = source;
-  activePath = path;
-  sourceFile.value = path;
-  editor.value = source;
-  if (session.kind === 'scratch') saveScratchSource(source);
+  updateStructuredFiles([{ path, source }], path);
+}
+
+function updateStructuredFiles(
+  updates: readonly { readonly path: string; readonly source: string }[],
+  preferredPath = activePath,
+): void {
+  const files = updates.map((update) => {
+    const file = session.files.find((candidate) => candidate.path === update.path);
+    if (file === undefined) {
+      throw new Error(`Source file ${JSON.stringify(update.path)} is not open.`);
+    }
+    return { file, source: update.source };
+  });
+  for (const update of files) update.file.content = update.source;
+  if (session.kind === 'scratch') saveScratchSource(session.files[0]?.content ?? '');
+  const selected = session.files.find((file) => file.path === preferredPath) ?? currentFile();
+  activePath = selected.path;
+  sourceFile.value = selected.path;
+  editor.value = selected.content;
   markBuildStale();
   updateStats();
+}
+
+function renameProjectScene(from: string, to: string): void {
+  const storyUpdates = renameStoryScene(
+    session.files
+      .filter((file) => file.path.endsWith('.story'))
+      .map((file) => ({ path: file.path, source: file.content })),
+    from,
+    to,
+  );
+  const updates = [...storyUpdates];
+  const manifest = session.files.find((file) => file.path === 'project.toml');
+  if (manifest !== undefined) {
+    const source = renameProjectEntryScene(manifest.content, from, to);
+    if (source !== manifest.content) updates.push({ path: manifest.path, source });
+  }
+  updateStructuredFiles(updates);
 }
 
 function openAdvancedSource(path: string, from = 0, to = from): void {
@@ -211,6 +263,7 @@ function openAdvancedSource(path: string, from = 0, to = from): void {
 function setSession(next: EditorSession, preferredPath?: string): void {
   session = next;
   structuredEditorElements.status.textContent = '';
+  storyMapElements.status.textContent = '';
   activePath =
     preferredPath !== undefined && next.files.some((file) => file.path === preferredPath)
       ? preferredPath
@@ -558,6 +611,7 @@ structuredEditor = new StructuredSceneEditor(
   {
     files: () => session.files,
     updateFile: updateStructuredFile,
+    renameScene: renameProjectScene,
     selectFile(path) {
       const file = session.files.find((candidate) => candidate.path === path);
       if (file === undefined) return;
@@ -571,6 +625,19 @@ structuredEditor = new StructuredSceneEditor(
   },
   structuredEditorElements,
 );
+storyMap = new StoryMapEditor(
+  {
+    files: () => session.files,
+    updateFile: updateStructuredFile,
+    renameScene: renameProjectScene,
+    openScene(path, sceneId) {
+      setAuthoringMode('visual');
+      structuredEditor.selectScene(path, sceneId);
+    },
+    preview: runStory,
+  },
+  storyMapElements,
+);
 setAuthoringMode('visual');
 runStory();
 
@@ -580,6 +647,7 @@ editor.addEventListener('input', () => {
   markBuildStale();
   updateStats();
   structuredEditor.refresh();
+  storyMap.refresh();
 });
 editor.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
@@ -596,9 +664,11 @@ editor.addEventListener('keydown', (event) => {
     markBuildStale();
     updateStats();
     structuredEditor.refresh();
+    storyMap.refresh();
   }
 });
 visualModeButton.addEventListener('click', () => setAuthoringMode('visual'));
+storyMapModeButton.addEventListener('click', () => setAuthoringMode('map'));
 sourceModeButton.addEventListener('click', () => setAuthoringMode('source'));
 sourceFile.addEventListener('change', () => {
   const path = sourceFile.value;
