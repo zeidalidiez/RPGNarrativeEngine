@@ -107,6 +107,7 @@ The first-success target is **under ten minutes from opening the app to playing 
 ### 2.1 Product goals
 
 - Make narrative-game creation approachable to writers who have never used a game engine.
+- Make the visual creator application the primary authoring workflow; learning or editing story syntax is never required for ordinary scene construction.
 - Make the default output feel intentional and polished without requiring visual assets.
 - Preserve a text-file workflow for experienced authors, version control, and collaboration.
 - Support branching, variables, conditions, reusable scenes, save/load, history, and endings.
@@ -121,7 +122,7 @@ The first-success target is **under ten minutes from opening the app to playing 
 ### 2.2 Explicit non-goals for the MVP
 
 - Character sprites, portrait systems, general-purpose animation timelines, scene cameras, or FMV/video cutscenes.
-- A fully visual node-based story authoring system that replaces source text.
+- An opaque visual-authoring database that replaces portable project files or cannot round-trip through ordinary source control.
 - Any player-facing grid, tile map, minimap, world graph, map cursor, or spatial avatar. The creator-only World Graph is authoring and validation tooling, not a game screen.
 - Real-time multiplayer or cloud collaboration.
 - An official plugin marketplace, remote plugin installation, or plugin payments.
@@ -389,8 +390,10 @@ The desktop editor has seven context-sensitive workspaces. Story-only projects d
 #### Writer
 
 - Project and story-file navigator.
-- CodeMirror source editor with syntax highlighting, completion, hover documentation, folding, outline, rename, and diagnostics.
-- A source-aware Insert palette that lets beginners add dialogue, choices, conditions, audio, and state changes through small forms; each action previews and applies an ordinary readable source edit rather than hidden editor data.
+- A structured scene editor is the default workspace: ordered visual cards represent narration, dialogue, choices, conditions, state changes, calls, jumps, effects, and endings.
+- Labeled forms and pickers let creators add, edit, reorder, duplicate, and remove supported content without writing `.story` syntax. Scene targets, speakers, variants, variables, and commands use project-aware selectors rather than requiring memorized IDs.
+- Card operations preview and apply ordinary readable source edits through one undoable transaction. Unsupported plugin commands remain visible as preserved custom-command cards.
+- An optional Advanced Source view uses CodeMirror with syntax highlighting, completion, hover documentation, folding, outline, rename, and diagnostics.
 - Live player pane that updates without losing the current test position when a safe hot reload is possible.
 - “Play from here” and “replay scene” actions.
 - Variable, call-stack, event-log, and audio-channel inspectors.
@@ -442,9 +445,9 @@ Zooming changes the amount of semantic detail; it does not merely make tiny node
 - Manual pinning and saved viewport positions are optional editor metadata stored separately from story semantics. Deleting that metadata must never change or break the story.
 - The 1.0 scale fixture must demonstrate that a 1,000-scene project opens in a useful clustered view without attempting to render every decision at once.
 
-**Editing boundary**
+**Editing model**
 
-The P0 Story Map is structurally read-only: it navigates, filters, explains, and visualizes canonical source. P1 may add guided actions such as “create a scene from this missing target,” “add a choice leading here,” or “rename this scene.” Those actions must preview and apply ordinary source edits through the same source-edit transaction used by the Writer workspace. Freeform drag-to-rewire graph authoring remains deferred until lossless source round-tripping can be guaranteed.
+The Story Map is directly editable from its first creator release. Writers can create, connect, reconnect, rename, duplicate, and delete scenes and supported transitions, then open any scene or decision in the structured editor. Graph gestures, forms, menus, and keyboard actions all produce the same previewed source transaction; invalid or lossy operations are rejected before canonical source changes. Source remains the portable backing representation, but authors are not required to view or edit it.
 
 #### World Graph — creator only
 
@@ -2414,7 +2417,7 @@ This section is retained as the original research document's feature grouping. I
 
 Deliver:
 
-- Clickable editor prototype for Writer, Voice Studio, the creator-only World Graph, and Database/Combat Lab.
+- Clickable editor prototype for the structured scene editor, editable Story Map, Voice Studio, creator-only World Graph, and Database/Combat Lab.
 - Browser player prototype with opposing left/right conversation stacks, centered narration, three box voices, variants, choices, audio, and accessibility controls.
 - Text-world prototype with three locations, left/right route choices, one blocked forward route, and no player-facing grid, minimap, graph, or avatar.
 - 4v4 text-combat interaction prototype proving four ally command groups, target selection, intent review, descriptive enemy health, and chronological narrow-screen reflow. Mechanics can be mocked at this milestone, but the interaction cannot be reduced to a single generic combat menu.
@@ -2453,7 +2456,7 @@ Exit criteria:
 
 Deliver:
 
-- Desktop editor Writer, Story Map, creator-only World Graph, RPG Database/Combat Lab, Voice Studio, Assets, and Build workspaces.
+- Desktop editor with GUI-first structured scene authoring, editable Story Map, optional Advanced Source, creator-only World Graph, RPG Database/Combat Lab, Voice Studio, Assets, and Build workspaces.
 - Live preview, diagnostics, play from scene, variable inspector, and safe hot reload.
 - Default accessible conversation, monologue, ensemble, and system layouts plus history, save/load, auto, skip, and settings.
 - Production P0 world, party, combat, encounters, inventory, economy-transaction, and basic-progression modules with schema forms, reference search, and module-aware lint.
@@ -2711,7 +2714,7 @@ The following defaults are fixed for implementation and remove alternatives that
 3. **Decorative media:** core supports colors, gradients, CSS patterns, declared theme frames/textures, packaged fonts, transition stills/small frame sequences, and optional nonessential icons. Character art, semantic scene imagery, video, and graphical maps are not core requirements and cannot be the sole carrier of information.
 4. **License:** use MIT for engine, editor, CLI, SDK, and code templates. Sample prose/assets use CC0 where legally available. Documentation remains MIT unless the owner explicitly selects CC BY 4.0 before publication.
 5. **Localization:** stable content/entity IDs and locale-ready schemas are foundational; the complete translation-management UI follows the core authoring surfaces.
-6. **Visual editing depth:** source is canonical. Story Map begins structurally read-only and gains guided source-edit operations. World Graph uses guided graph/form/table edits with diff preview. Freeform story rewiring is implemented only if exact source round-tripping can be demonstrated.
+6. **Visual editing depth:** the creator GUI is primary and raw source is optional. The structured scene editor and editable Story Map support complete ordinary scene construction and connection from their first creator release. Visual actions write canonical source through previewed, undoable transactions; World Graph uses the same graph/form/table model. No action may silently lose or hide unsupported source.
 7. **Combat timing:** collect and review one intent per able ally, then select enemy intents and resolve all intents by deterministic initiative.
 8. **Currency breadth:** support multiple arbitrary textual currencies from the initial economy implementation.
 9. **Enemy information modes:** support descriptive by default, exact text as opt-in, and hidden as an advanced textual mode. No first-party life-bar mode exists.

@@ -19,6 +19,7 @@ import {
 } from '@rpgnarrativeengine/project';
 
 import starterStory from './starter.story?raw';
+import { StructuredSceneEditor, type StructuredEditorElements } from './structured-editor.js';
 import './style.css';
 
 const STORAGE_KEY = 'rpgnarrativeengine.playground.story';
@@ -54,6 +55,7 @@ const player = required<HTMLElement>('#player');
 const diagnostics = required<HTMLElement>('#diagnostics');
 const compileStatus = required<HTMLElement>('#compile-status');
 const sourceStats = required<HTMLElement>('#source-stats');
+const editorHint = required<HTMLElement>('#editor-hint');
 const projectName = required<HTMLElement>('#project-name');
 const sourceFile = required<HTMLSelectElement>('#source-file');
 const runButton = required<HTMLButtonElement>('#run-button');
@@ -73,10 +75,27 @@ const buildProgress = required<HTMLElement>('#build-progress');
 const buildResults = required<HTMLElement>('#build-results');
 const buildHash = required<HTMLElement>('#build-hash');
 const artifactList = required<HTMLElement>('#artifact-list');
+const visualModeButton = required<HTMLButtonElement>('#visual-mode-button');
+const sourceModeButton = required<HTMLButtonElement>('#source-mode-button');
+const sceneBuilderRoot = required<HTMLElement>('#scene-builder');
+const sourceEditorWrap = required<HTMLElement>('#source-editor-wrap');
+const structuredEditorElements: StructuredEditorElements = {
+  sceneList: required<HTMLElement>('#scene-list'),
+  canvas: required<HTMLElement>('#scene-canvas'),
+  status: required<HTMLElement>('#scene-builder-status'),
+  newScene: required<HTMLButtonElement>('#new-scene-button'),
+  addNarration: required<HTMLButtonElement>('#add-narration-button'),
+  addDialogue: required<HTMLButtonElement>('#add-dialogue-button'),
+  addChoice: required<HTMLButtonElement>('#add-choice-button'),
+  addState: required<HTMLButtonElement>('#add-state-button'),
+  addEnding: required<HTMLButtonElement>('#add-ending-button'),
+};
 
 let controller: NarrativePlayerController | null = null;
 let session: EditorSession;
 let activePath = '';
+let structuredEditor: StructuredSceneEditor | null = null;
+let authoringMode: 'source' | 'visual' = 'visual';
 
 function savedSource(): string {
   try {
@@ -116,6 +135,28 @@ function updateStats(): void {
   sourceStats.textContent = `${lineCount} ${lineCount === 1 ? 'line' : 'lines'} \u00b7 ${editor.value.length} characters${fileCount > 1 ? ` \u00b7 ${fileCount} files` : ''}`;
 }
 
+function setAuthoringMode(mode: 'source' | 'visual'): void {
+  authoringMode = mode;
+  const visual = mode === 'visual';
+  sceneBuilderRoot.hidden = !visual;
+  sourceEditorWrap.hidden = visual;
+  visualModeButton.classList.toggle('authoring-tab-active', visual);
+  sourceModeButton.classList.toggle('authoring-tab-active', !visual);
+  visualModeButton.setAttribute('aria-selected', String(visual));
+  sourceModeButton.setAttribute('aria-selected', String(!visual));
+  editorHint.textContent = visual
+    ? 'Visual changes update the same portable story files.'
+    : 'Ctrl/⌘ + Enter runs the current project.';
+  if (visual) structuredEditor?.refresh();
+}
+
+function markBuildStale(): void {
+  if (session.kind === 'project' && !buildResults.hidden) {
+    buildResults.hidden = true;
+    buildProgress.textContent = 'Project changed. Build again to refresh the artifacts.';
+  }
+}
+
 function refreshFileSelector(): void {
   sourceFile.replaceChildren();
   for (const file of session.files) {
@@ -142,11 +183,34 @@ function activateFile(path: string, focus = false): void {
   editor.value = file.content;
   editor.scrollTop = 0;
   updateStats();
+  structuredEditor?.refresh();
   if (focus) editor.focus();
+}
+
+function updateStructuredFile(path: string, source: string): void {
+  const file = session.files.find((candidate) => candidate.path === path);
+  if (file === undefined) throw new Error(`Story file ${JSON.stringify(path)} is not open.`);
+  file.content = source;
+  activePath = path;
+  sourceFile.value = path;
+  editor.value = source;
+  if (session.kind === 'scratch') saveScratchSource(source);
+  markBuildStale();
+  updateStats();
+}
+
+function openAdvancedSource(path: string, from = 0, to = from): void {
+  setAuthoringMode('source');
+  activateFile(path);
+  const start = Math.min(Math.max(0, from), editor.value.length);
+  const end = Math.min(Math.max(start, to), editor.value.length);
+  editor.focus();
+  editor.setSelectionRange(start, end);
 }
 
 function setSession(next: EditorSession, preferredPath?: string): void {
   session = next;
+  structuredEditorElements.status.textContent = '';
   activePath =
     preferredPath !== undefined && next.files.some((file) => file.path === preferredPath)
       ? preferredPath
@@ -164,6 +228,7 @@ function sourceForIssue(issue: CompileIssue): string {
 }
 
 function focusIssue(issue: CompileIssue): void {
+  setAuthoringMode('source');
   if (issue.path !== undefined) activateFile(issue.path);
   const source = editor.value;
   const start = Math.min(Math.max(0, issue.from), source.length);
@@ -489,16 +554,32 @@ setSession({
   name: 'Scratch story',
   files: [{ path: 'main.story', content: savedSource() }],
 });
+structuredEditor = new StructuredSceneEditor(
+  {
+    files: () => session.files,
+    updateFile: updateStructuredFile,
+    selectFile(path) {
+      const file = session.files.find((candidate) => candidate.path === path);
+      if (file === undefined) return;
+      activePath = path;
+      sourceFile.value = path;
+      editor.value = file.content;
+      updateStats();
+    },
+    openAdvancedSource,
+    preview: runStory,
+  },
+  structuredEditorElements,
+);
+setAuthoringMode('visual');
 runStory();
 
 editor.addEventListener('input', () => {
   currentFile().content = editor.value;
   if (session.kind === 'scratch') saveScratchSource(editor.value);
-  if (session.kind === 'project' && !buildResults.hidden) {
-    buildResults.hidden = true;
-    buildProgress.textContent = 'Project changed. Build again to refresh the artifacts.';
-  }
+  markBuildStale();
   updateStats();
+  structuredEditor.refresh();
 });
 editor.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
@@ -511,10 +592,19 @@ editor.addEventListener('keydown', (event) => {
     const end = editor.selectionEnd;
     editor.setRangeText('  ', start, end, 'end');
     currentFile().content = editor.value;
+    if (session.kind === 'scratch') saveScratchSource(editor.value);
+    markBuildStale();
     updateStats();
+    structuredEditor.refresh();
   }
 });
-sourceFile.addEventListener('change', () => activateFile(sourceFile.value, true));
+visualModeButton.addEventListener('click', () => setAuthoringMode('visual'));
+sourceModeButton.addEventListener('click', () => setAuthoringMode('source'));
+sourceFile.addEventListener('change', () => {
+  const path = sourceFile.value;
+  if (!path.endsWith('.story')) setAuthoringMode('source');
+  activateFile(path, authoringMode === 'source');
+});
 runButton.addEventListener('click', runStory);
 downloadButton.addEventListener('click', downloadSource);
 buildButton.addEventListener('click', openBuildDialog);

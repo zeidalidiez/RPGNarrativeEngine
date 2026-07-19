@@ -58,6 +58,8 @@ These constraints apply throughout the build:
 - Enemy health is descriptive text by default. Exact and hidden modes remain textual; first-party life bars do not exist.
 - Story-only projects can omit all RPG modules. Disabled modules contribute no game runtime code, commands, state, save namespace, player UI, or export data.
 - Project source remains ordinary UTF-8 text. The editor modifies canonical source rather than maintaining an opaque database.
+- The creator application is GUI-first. A creator can build complete scenes, choices, conditions, state changes, links, and endings through structured visual controls without editing source syntax; raw source is an optional advanced view.
+- The visual Story Map is an editing surface as well as an analysis surface. Creating, connecting, reconnecting, renaming, duplicating, and deleting supported story structures updates canonical source through undoable source transactions.
 - The compiler and runtime are independent of React, Tauri, the DOM, and direct filesystem APIs.
 - Release players do not parse `.story` source.
 - Story source cannot execute arbitrary HTML or JavaScript.
@@ -94,7 +96,7 @@ These defaults remove the open-ended alternatives in the research specification.
 | Currency | Multiple arbitrary textual currencies are supported from the initial economy implementation. |
 | Enemy information | `descriptive` is the default; `exact` and `hidden` are supported textual project modes; no life-bar mode exists. |
 | Localization | Stable content/entity IDs and locale-ready schemas are foundational. Full translation management UI is implemented after the core authoring surfaces. |
-| Story Map editing | Generated and structurally read-only first; guided source-edit actions follow. Freeform rewiring is allowed only if exact source round-tripping is demonstrated. |
+| Visual story authoring | The structured scene editor and editable Story Map are primary creator workflows. Their forms, cards, graph gestures, menus, and keyboard equivalents produce previewed, undoable edits to canonical `.story` files; raw source is optional. |
 | World Graph editing | Guided graph/form/table edits produce previewed, minimal canonical TOML edits. Nested exits infer `from` from the containing location. |
 | Decorative media | Declared theme frames/textures, packaged fonts, transition stills/small frame sequences, and optional nonessential icons are supported. Character art, semantic scene imagery, video, and graphical maps are not core requirements and cannot carry required information. |
 | Plugin installation | Initial plugins are local or vendored build-time packages. There is no remote executable-plugin installation or marketplace in the foundational implementation. |
@@ -831,13 +833,14 @@ Completion evidence:
 - Capability expansion requires explicit creator approval.
 - Conflicts and incompatible versions fail with actionable diagnostics.
 
-### Build Stage 10: Tauri editor platform and source transactions
+### Build Stage 10: Visual editor platform and source transactions
 
-- React application shell and Tauri 2 backend.
+- Browser-runnable React application shell wrapped by a Tauri 2 backend for desktop releases.
 - Capability-scoped Tauri filesystem, dialog, watcher, and packaging commands; no general shell or filesystem escape exposed to frontend/plugins.
 - Project create/open/rename/recent workflow.
 - Atomic writes, recovery copies, external-change hashes, conflict UI, undo/redo, and minimal source-edit transactions.
 - Semantic TOML parsing plus span-based surgical edits. Unsupported edits fall back to exact raw-source navigation rather than whole-file rewriting.
+- A structured story model derived from the parser exposes scenes, ordered beats, dialogue, choices, conditions, state changes, calls, jumps, and endings to GUI controls without creating a second canonical format.
 - Production player embedded for preview; editor does not implement a second approximation.
 - Shared compiler worker/service and cancellation for stale results.
 
@@ -852,12 +855,17 @@ Completion evidence:
 
 #### 11.1 Writer
 
-- Project/file tree, CodeMirror language support, diagnostics, outline, completion, hover, folding, rename, Insert palette, exact source navigation, live preview, play from here, replay scene, variables, call stack, events, RNG, modules, and audio inspectors.
+- The default view is a structured scene editor: scene navigator plus ordered, draggable cards for narration, dialogue, choices, conditions, state changes, calls, jumps, effects, and endings.
+- Creators add and edit supported content through labeled fields, target pickers, expression/condition builders, speaker and variant selectors, and contextual menus. They can complete the ordinary authoring workflow without knowing `.story` syntax.
+- Every card operation has keyboard controls and participates in previewed, undoable source transactions. Unsupported plugin syntax remains visible as a preserved custom-command card rather than disappearing.
+- An Advanced Source view provides CodeMirror language support, diagnostics, outline, completion, hover, folding, rename, and exact source navigation without becoming the required workflow.
+- Live preview, play from here, replay scene, variables, call stack, events, RNG, modules, and audio inspectors use the same structured selection and canonical project state.
 
 #### 11.2 Story Map
 
 - Compiler-generated stable graph, semantic zoom, clusters, deterministic layout, search, filters, reachability, calls/returns, choices, endings, source navigation, current playthrough, state reads/writes, test coverage, route/outcome traces, comparisons, saved editor-only view metadata, and full structured-list parity.
-- Guided edits operate through source transactions. No opaque graph semantics.
+- Direct authoring includes create, connect, reconnect, rename, duplicate, and delete actions for scenes and supported transitions, plus opening any scene or decision in its structured editor.
+- Dragging an edge or node is a GUI operation over a previewed source transaction, not opaque graph-only semantics. Invalid operations are rejected before source changes; every graph action also has a keyboard/menu/form equivalent.
 
 #### 11.3 World Graph
 
@@ -897,6 +905,7 @@ Completion evidence:
 
 - Every workspace edits or inspects the same canonical project consumed by CLI builds.
 - Every graph/drag action has a keyboard/form/menu equivalent.
+- A first-time creator can construct, connect, preview, and build a multi-scene branching story without opening Advanced Source.
 - A project edited externally and in the editor remains round-trippable.
 - The reference 1,000-scene fixture opens in a useful clustered Story Map.
 - A creator can configure metadata/icons, choose targets/formats, build web and the current native platform, inspect failures, and run/open successful artifacts without opening a terminal.
@@ -1406,8 +1415,10 @@ The first implementation work proceeds in this exact dependency order:
 9. Implement symbol resolution, type checking, CFG/Story Map projection, and IR lowering.
 10. Write C-06 through C-08 and C-11: scheduler/effects, transactions/events, RNG, and saves.
 11. Implement deterministic runtime, headless traces, and story tests.
-12. Write and implement C-10 module host.
-13. Build the first-party modules in Stage 6 order.
-14. Build the theme/audio/player layers, CLI/exporters, plugin SDK, and editor according to their declared dependencies.
+12. Implement the structured scene editor, editable Story Map foundation, source transactions, and production-player preview in the browser-runnable creator app.
+13. Wrap the same creator application in the Tauri 2 project/filesystem shell; do not create a separate desktop editor implementation.
+14. Write and implement C-10 module host.
+15. Build the first-party modules in Stage 6 order, adding their schema-driven GUI cards/forms as each module becomes authorable.
+16. Complete the theme/audio/player layers, native exporters, plugin SDK, and remaining editor workspaces according to their declared dependencies.
 
 No additional product clarification is required before step 1. OWNER-001 through OWNER-003 can be resolved before their associated publication or visual-fidelity work.

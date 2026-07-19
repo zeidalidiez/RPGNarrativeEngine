@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Write and play RPG Narrative Engine stories directly in your browser."
+      content="Build and play RPG Narrative Engine stories through a visual creator workspace."
     />
     <meta name="theme-color" content="#111318" />
-    <title>Story Playground · RPG Narrative Engine</title>
+    <title>Creator Studio · RPG Narrative Engine</title>
   </head>
   <body>
     <main class="app-shell">
@@ -17,7 +17,7 @@
           <span class="brand-mark" aria-hidden="true">RNE</span>
           <div>
             <p>RPG Narrative Engine</p>
-            <h1>Story Playground</h1>
+            <h1>Creator Studio</h1>
           </div>
         </div>
         <div class="header-actions">
@@ -47,17 +47,65 @@
       </header>
 
       <section class="workspace" aria-label="Story authoring playground">
-        <section class="editor-pane" aria-labelledby="source-heading">
+        <section class="editor-pane" aria-labelledby="authoring-heading">
           <div class="pane-header">
             <div class="source-heading">
               <p id="project-name" class="pane-kicker">Scratch story</p>
-              <h2 id="source-heading" class="sr-only">Project source</h2>
+              <h2 id="authoring-heading" class="sr-only">Story authoring</h2>
               <label class="sr-only" for="source-file">Open source file</label>
               <select id="source-file" class="source-file" aria-describedby="project-name"></select>
             </div>
             <button id="reset-button" class="text-button" type="button">Reset example</button>
           </div>
-          <div class="editor-wrap">
+          <div class="authoring-switcher" role="tablist" aria-label="Story editor view">
+            <button
+              id="visual-mode-button"
+              class="authoring-tab authoring-tab-active"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="scene-builder"
+            >
+              Scene builder
+            </button>
+            <button
+              id="source-mode-button"
+              class="authoring-tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="source-editor-wrap"
+            >
+              Advanced source
+            </button>
+          </div>
+          <div id="scene-builder" class="scene-builder" role="tabpanel">
+            <aside class="scene-browser" aria-label="Project scenes">
+              <div class="scene-browser-header">
+                <div>
+                  <p class="pane-kicker">Story structure</p>
+                  <h3>Scenes</h3>
+                </div>
+                <button id="new-scene-button" class="scene-add-button" type="button">
+                  + Scene
+                </button>
+              </div>
+              <div id="scene-list" class="scene-list"></div>
+            </aside>
+            <section class="scene-workbench" aria-label="Selected scene">
+              <div class="scene-insert-bar" aria-label="Add scene content">
+                <span>Add</span>
+                <button id="add-narration-button" type="button">Narration</button>
+                <button id="add-dialogue-button" type="button">Dialogue</button>
+                <button id="add-choice-button" type="button">Choice</button>
+                <button id="add-state-button" type="button">State</button>
+                <button id="add-ending-button" type="button">Ending</button>
+              </div>
+              <p id="scene-builder-status" class="scene-builder-status" role="status"></p>
+              <div id="scene-canvas" class="scene-canvas"></div>
+            </section>
+          </div>
+          <div id="source-editor-wrap" class="editor-wrap" role="tabpanel" hidden>
             <label class="sr-only" for="story-source">Story source</label>
             <textarea
               id="story-source"
@@ -68,7 +116,7 @@
             ></textarea>
           </div>
           <div class="editor-footer">
-            <p id="editor-hint"><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> to run</p>
+            <p id="editor-hint">Visual changes update the same portable story files.</p>
             <p id="source-stats" aria-live="polite"></p>
           </div>
         </section>

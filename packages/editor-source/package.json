@@ -6,6 +6,9 @@
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
+  "dependencies": {
+    "@rpgnarrativeengine/language": "workspace:*"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

@@ -8,6 +8,7 @@
   "dependencies": {
     "@rpgnarrativeengine/build": "workspace:*",
     "@rpgnarrativeengine/compiler": "workspace:*",
+    "@rpgnarrativeengine/editor-source": "workspace:*",
     "@rpgnarrativeengine/player": "workspace:*",
     "@rpgnarrativeengine/project": "workspace:*"
   },

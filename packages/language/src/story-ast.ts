@@ -295,15 +295,19 @@ function normalizeTrivia(context: NormalizationContext, node: SyntaxNode): Story
 
 function decodeLeadingTextMarker(raw: string): {
   readonly escaped: boolean;
+  readonly inlineEscapeWidth: 0 | 1;
   readonly text: string;
 } {
   if (raw.startsWith('\\::') || raw.startsWith('\\@') || raw.startsWith('\\*')) {
-    return Object.freeze({ escaped: true, text: raw.slice(1) });
+    return Object.freeze({ escaped: true, inlineEscapeWidth: 0, text: raw.slice(1) });
   }
   if (raw.startsWith('\\\\')) {
-    return Object.freeze({ escaped: true, text: raw.slice(1) });
+    return Object.freeze({ escaped: true, inlineEscapeWidth: 0, text: raw.slice(1) });
   }
-  return Object.freeze({ escaped: false, text: raw });
+  if (raw.startsWith('\\') && /:[ \t]/u.test(raw.slice(1))) {
+    return Object.freeze({ escaped: true, inlineEscapeWidth: 1, text: raw.slice(1) });
+  }
+  return Object.freeze({ escaped: false, inlineEscapeWidth: 0, text: raw });
 }
 
 function findDialogueDelimiter(source: string, range: SourceRange): number {
@@ -459,6 +463,7 @@ function normalizeText(context: NormalizationContext, node: SyntaxNode): StoryTe
   }
 
   let escapedLeadingMarker = false;
+  let leadingInlineEscapeWidth: 0 | 1 = 0;
   let contentId: ContentId | null = null;
   let contentIdSpan: SourceSpan | null = null;
   let valid = true;
@@ -495,8 +500,11 @@ function normalizeText(context: NormalizationContext, node: SyntaxNode): StoryTe
     }
     const content = context.source.slice(contentRange.from, contentRange.to);
     const decoded =
-      index === 0 ? decodeLeadingTextMarker(content) : { escaped: false, text: content };
+      index === 0
+        ? decodeLeadingTextMarker(content)
+        : { escaped: false, inlineEscapeWidth: 0 as const, text: content };
     escapedLeadingMarker ||= decoded.escaped;
+    if (index === 0) leadingInlineEscapeWidth = decoded.inlineEscapeWidth;
     contentRanges.push(contentRange);
     lines.push(
       Object.freeze({
@@ -516,7 +524,11 @@ function normalizeText(context: NormalizationContext, node: SyntaxNode): StoryTe
   }
   const dialogue = parseDialogueHead(context, firstContentRange, escapedLeadingMarker);
   const inlineSegments: StoryInlineSourceSegment[] = contentRanges.map((range, index) =>
-    Object.freeze(index === 0 ? dialogue.bodyRange : range),
+    Object.freeze(
+      index === 0
+        ? { from: dialogue.bodyRange.from + leadingInlineEscapeWidth, to: dialogue.bodyRange.to }
+        : range,
+    ),
   );
   const inline = normalizeStoryInline(context.source, inlineSegments, context.map);
   context.issues.push(...inline.issues);

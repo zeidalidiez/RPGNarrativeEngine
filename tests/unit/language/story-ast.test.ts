@@ -134,6 +134,20 @@ describe('normalized story AST', () => {
     });
   });
 
+  it('keeps escaped dialogue-shaped text as narration for visual authoring', () => {
+    const result = parseStoryAst(':: start\n\\Mara: This is narration, not dialogue.\n');
+    expect(result.issues).toEqual([]);
+    const text = result.document?.scenes[0]?.items.find(
+      (item): item is StoryTextAst => item.kind === 'text',
+    );
+    expect(text).toMatchObject({
+      mode: 'narration',
+      escapedLeadingMarker: true,
+      lines: [{ text: 'Mara: This is narration, not dialogue.' }],
+      inline: [{ kind: 'text', value: 'Mara: This is narration, not dialogue.' }],
+    });
+  });
+
   it('rejects source that is structurally parseable but not lexically valid', () => {
     const invalidScene = parseStoryAst(':: Invalid Scene\n@ending end "End"\n');
     expect(invalidScene.document).toBeNull();

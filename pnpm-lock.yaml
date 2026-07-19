@@ -70,6 +70,9 @@ importers:
       '@rpgnarrativeengine/compiler':
         specifier: workspace:*
         version: link:../../packages/compiler
+      '@rpgnarrativeengine/editor-source':
+        specifier: workspace:*
+        version: link:../../packages/editor-source
       '@rpgnarrativeengine/player':
         specifier: workspace:*
         version: link:../../packages/player
@@ -142,7 +145,11 @@ importers:
 
   packages/contracts: {}
 
-  packages/editor-source: {}
+  packages/editor-source:
+    dependencies:
+      '@rpgnarrativeengine/language':
+        specifier: workspace:*
+        version: link:../language
 
   packages/exporter-desktop: {}
 
