@@ -44,10 +44,15 @@ async function collectFiles(directory) {
   }
 
   for (const entry of entries) {
-    if (['build', 'dist', 'node_modules'].includes(entry.name)) {
+    const entryPath = path.join(directory, entry.name);
+    const isBuildPackage =
+      entry.name === 'build' && entryPath === path.join(ROOT, 'packages', 'build');
+    if (
+      ['dist', 'node_modules'].includes(entry.name) ||
+      (entry.name === 'build' && !isBuildPackage)
+    ) {
       continue;
     }
-    const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
       files.push(...(await collectFiles(entryPath)));
     } else if (

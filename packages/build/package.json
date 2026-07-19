@@ -1,17 +1,15 @@
 {
-  "name": "@rpgnarrativeengine/exporter-web",
+  "name": "@rpgnarrativeengine/build",
   "version": "0.0.0",
   "private": true,
-  "description": "RPG Narrative Engine exporter-web package.",
+  "description": "RPG Narrative Engine build package.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
   "dependencies": {
-    "@rpgnarrativeengine/ir": "workspace:*",
-    "@rpgnarrativeengine/player": "workspace:*"
-  },
-  "devDependencies": {
-    "vite": "8.1.5"
+    "@rpgnarrativeengine/compiler": "workspace:*",
+    "@rpgnarrativeengine/exporter-web": "workspace:*",
+    "@rpgnarrativeengine/project": "workspace:*"
   },
   "exports": {
     ".": {
@@ -23,9 +21,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "pnpm run generate:player && tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
     "clean": "tsc -b tsconfig.json --clean",
-    "generate:player": "node scripts/generate-web-player.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }

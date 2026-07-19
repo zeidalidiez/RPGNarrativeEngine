@@ -6,6 +6,7 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@rpgnarrativeengine/build": "workspace:*",
     "@rpgnarrativeengine/compiler": "workspace:*",
     "@rpgnarrativeengine/player": "workspace:*",
     "@rpgnarrativeengine/project": "workspace:*"

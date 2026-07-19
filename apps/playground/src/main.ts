@@ -1,4 +1,11 @@
 import {
+  buildWebProject,
+  configuredWebBuildTargets,
+  type BuildOutputFile,
+  type BuildProjectResult,
+  type WebBuildTarget,
+} from '@rpgnarrativeengine/build';
+import {
   compileStory,
   compileStoryProject,
   StoryCompileError,
@@ -54,8 +61,18 @@ const resetButton = required<HTMLButtonElement>('#reset-button');
 const openButton = required<HTMLButtonElement>('#open-button');
 const projectButton = required<HTMLButtonElement>('#project-button');
 const downloadButton = required<HTMLButtonElement>('#download-button');
+const buildButton = required<HTMLButtonElement>('#build-button');
 const fileInput = required<HTMLInputElement>('#file-input');
 const projectInput = required<HTMLInputElement>('#project-input');
+const buildDialog = required<HTMLDialogElement>('#build-dialog');
+const buildTargets = required<HTMLFieldSetElement>('#build-targets');
+const targetWebZip = required<HTMLInputElement>('#target-web-zip');
+const targetWebSingle = required<HTMLInputElement>('#target-web-single');
+const startBuildButton = required<HTMLButtonElement>('#start-build-button');
+const buildProgress = required<HTMLElement>('#build-progress');
+const buildResults = required<HTMLElement>('#build-results');
+const buildHash = required<HTMLElement>('#build-hash');
+const artifactList = required<HTMLElement>('#artifact-list');
 
 let controller: NarrativePlayerController | null = null;
 let session: EditorSession;
@@ -112,6 +129,9 @@ function refreshFileSelector(): void {
     session.kind === 'project'
       ? `${session.name}${session.rootName === null ? '' : ` \u00b7 ${session.rootName}`}`
       : session.name;
+  buildButton.disabled = session.kind !== 'project';
+  buildButton.title =
+    session.kind === 'project' ? 'Package this project' : 'Open a project directory to build it';
 }
 
 function activateFile(path: string, focus = false): void {
@@ -255,15 +275,164 @@ function runStory(): void {
   }
 }
 
-function downloadSource(): void {
-  const file = currentFile();
-  const blob = new Blob([file.content], { type: 'text/plain;charset=utf-8' });
+function blobPart(content: string | Uint8Array): BlobPart {
+  if (typeof content === 'string') return content;
+  const buffer = new ArrayBuffer(content.byteLength);
+  new Uint8Array(buffer).set(content);
+  return buffer;
+}
+
+function downloadFile(filename: string, mimeType: string, content: string | Uint8Array): void {
+  const blob = new Blob([blobPart(content)], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = file.path.split('/').at(-1) ?? 'main.story';
+  link.download = filename;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function downloadSource(): void {
+  const file = currentFile();
+  downloadFile(
+    file.path.split('/').at(-1) ?? 'main.story',
+    'text/plain;charset=utf-8',
+    file.content,
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function artifactCard(
+  label: string,
+  description: string,
+  buttonLabel: string,
+  file: BuildOutputFile,
+): HTMLElement {
+  const card = document.createElement('article');
+  card.className = 'artifact-card';
+  const copy = document.createElement('div');
+  const name = document.createElement('p');
+  name.className = 'artifact-name';
+  name.textContent = label;
+  const metadata = document.createElement('p');
+  metadata.className = 'artifact-meta';
+  metadata.textContent = `${description} \u00b7 ${formatBytes(file.size)}`;
+  copy.append(name, metadata);
+  const download = document.createElement('button');
+  download.type = 'button';
+  download.className = 'button button-subtle';
+  download.textContent = buttonLabel;
+  download.addEventListener('click', () => {
+    downloadFile(file.path.split('/').at(-1) ?? file.path, file.mimeType, file.content);
+  });
+  card.append(copy, download);
+  return card;
+}
+
+function renderBuildResult(result: BuildProjectResult): void {
+  artifactList.replaceChildren();
+  for (const artifact of result.artifacts) {
+    if (artifact.kind !== 'file') continue;
+    if (artifact.target === 'web-zip') {
+      artifactList.append(
+        artifactCard(
+          'Static web ZIP',
+          'Extract and upload to an ordinary static host',
+          'Download ZIP',
+          artifact.file,
+        ),
+      );
+    } else if (artifact.target === 'web-single') {
+      artifactList.append(
+        artifactCard(
+          'Single HTML',
+          'Self-contained and directly runnable',
+          'Download HTML',
+          artifact.file,
+        ),
+      );
+    }
+  }
+  const manifest = result.outputFiles.find((file) => file.path === 'artifact-manifest.json');
+  if (manifest !== undefined) {
+    artifactList.append(
+      artifactCard(
+        'Artifact manifest',
+        'Checksums and build identity for the generated files',
+        'Download JSON',
+        manifest,
+      ),
+    );
+  }
+  buildHash.textContent = `Bundle ${result.gameBundleHash}`;
+  buildHash.title = result.gameBundleHash;
+  buildResults.hidden = false;
+}
+
+function buildFailure(error: unknown): void {
+  buildProgress.className = 'build-progress build-error';
+  buildProgress.textContent = error instanceof Error ? error.message : String(error);
+  compileStatus.className = 'compile-status compile-error';
+  compileStatus.textContent = 'Build failed';
+  if (error instanceof StoryCompileError) showIssues(error.issues);
+  else if (error instanceof ProjectLoadError) showIssues(projectCompileIssues(error));
+}
+
+function openBuildDialog(): void {
+  if (session.kind !== 'project') return;
+  buildResults.hidden = true;
+  artifactList.replaceChildren();
+  buildProgress.className = 'build-progress';
+  try {
+    const project = loadNarrativeProject(session.files);
+    const targets = configuredWebBuildTargets(project.manifest);
+    targetWebZip.checked = targets.includes('web') || targets.includes('web-zip');
+    targetWebSingle.checked = targets.includes('web-single');
+    buildProgress.textContent = `${project.manifest.project.title} \u00b7 ${project.manifest.build.profile} profile`;
+  } catch (error) {
+    targetWebZip.checked = false;
+    targetWebSingle.checked = false;
+    buildFailure(error);
+  }
+  buildDialog.showModal();
+}
+
+async function startBuild(): Promise<void> {
+  if (session.kind !== 'project') return;
+  const targets: WebBuildTarget[] = [];
+  if (targetWebZip.checked) targets.push('web-zip');
+  if (targetWebSingle.checked) targets.push('web-single');
+  if (targets.length === 0) {
+    buildProgress.className = 'build-progress build-error';
+    buildProgress.textContent = 'Select at least one output.';
+    return;
+  }
+
+  startBuildButton.disabled = true;
+  buildTargets.disabled = true;
+  buildResults.hidden = true;
+  buildProgress.className = 'build-progress';
+  try {
+    const result = await buildWebProject({
+      files: session.files,
+      targets,
+      onProgress(event) {
+        buildProgress.textContent = event.message;
+      },
+    });
+    renderBuildResult(result);
+    buildProgress.textContent = `${result.artifacts.length - 1} distributable outputs created`;
+  } catch (error) {
+    buildFailure(error);
+  } finally {
+    startBuildButton.disabled = false;
+    buildTargets.disabled = false;
+  }
 }
 
 function selectedPath(file: File): string {
@@ -325,6 +494,10 @@ runStory();
 editor.addEventListener('input', () => {
   currentFile().content = editor.value;
   if (session.kind === 'scratch') saveScratchSource(editor.value);
+  if (session.kind === 'project' && !buildResults.hidden) {
+    buildResults.hidden = true;
+    buildProgress.textContent = 'Project changed. Build again to refresh the artifacts.';
+  }
   updateStats();
 });
 editor.addEventListener('keydown', (event) => {
@@ -344,6 +517,8 @@ editor.addEventListener('keydown', (event) => {
 sourceFile.addEventListener('change', () => activateFile(sourceFile.value, true));
 runButton.addEventListener('click', runStory);
 downloadButton.addEventListener('click', downloadSource);
+buildButton.addEventListener('click', openBuildDialog);
+startBuildButton.addEventListener('click', () => void startBuild());
 openButton.addEventListener('click', () => fileInput.click());
 projectButton.addEventListener('click', () => projectInput.click());
 fileInput.addEventListener('change', () => {

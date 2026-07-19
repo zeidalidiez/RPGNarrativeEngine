@@ -96,6 +96,8 @@ button {
 .header-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 0.55rem;
 }
 
@@ -115,6 +117,24 @@ button {
   background: #272a33;
 }
 
+.button:disabled {
+  border-color: #2d3038;
+  color: #686d78;
+  background: #1b1d23;
+  cursor: not-allowed;
+}
+
+.button-build {
+  color: #b8ddd1;
+  border-color: #35594f;
+  background: #1b2d29;
+}
+
+.button-build:hover:not(:disabled) {
+  border-color: #568879;
+  background: #223a34;
+}
+
 .button-primary {
   display: inline-flex;
   align-items: center;
@@ -132,6 +152,7 @@ button {
 .button:focus-visible,
 .text-button:focus-visible,
 .source-file:focus-visible,
+.dialog-close:focus-visible,
 .diagnostic:focus-visible,
 .nre-button:focus-visible {
   outline: 3px solid rgba(240, 168, 75, 0.42);
@@ -449,6 +470,221 @@ kbd {
   font-weight: 400;
 }
 
+.build-dialog {
+  width: min(44rem, calc(100% - 2rem));
+  max-height: calc(100vh - 2rem);
+  padding: 0;
+  overflow: auto;
+  border: 1px solid #3a3e48;
+  border-radius: 0.9rem;
+  color: #e7e7e9;
+  background: #17191f;
+  box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.58);
+}
+
+.build-dialog::backdrop {
+  background: rgba(4, 6, 9, 0.76);
+  backdrop-filter: blur(4px);
+}
+
+.build-dialog-shell {
+  min-width: 0;
+}
+
+.build-dialog-header,
+.build-results-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.build-dialog-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid #30333b;
+  background: rgba(23, 25, 31, 0.97);
+}
+
+.build-dialog-header p,
+.build-dialog-header h2,
+.build-results-heading p,
+.build-results-heading h3 {
+  margin: 0;
+}
+
+.build-dialog-header h2,
+.build-results-heading h3 {
+  margin-top: 0.2rem;
+  font-size: 1rem;
+}
+
+.dialog-close {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #3b3f49;
+  border-radius: 50%;
+  color: #aeb2bc;
+  background: #20232a;
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+
+.dialog-close:hover {
+  color: #fff;
+  border-color: #5d6370;
+}
+
+.build-dialog-content {
+  padding: 1.15rem;
+}
+
+.build-intro {
+  margin: 0 0 1.2rem;
+  color: #a1a6b0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.build-intro code {
+  color: #d1b785;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.build-targets {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.build-targets legend {
+  margin-bottom: 0.6rem;
+  color: #777c88;
+  font-size: 0.63rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.build-target {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.8rem;
+  padding: 0.9rem;
+  border: 1px solid #343842;
+  border-radius: 0.65rem;
+  background: #1c1f26;
+  cursor: pointer;
+}
+
+.build-target:has(input:checked) {
+  border-color: #557d71;
+  background: #1b2927;
+}
+
+.build-target input {
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0.15rem 0 0;
+  accent-color: #eaae59;
+}
+
+.build-target span {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.build-target strong {
+  font-size: 0.83rem;
+}
+
+.build-target small {
+  color: #9298a4;
+  font-size: 0.73rem;
+  line-height: 1.45;
+}
+
+.build-action-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.build-progress {
+  margin: 0;
+  color: #a8acb5;
+  font-size: 0.73rem;
+}
+
+.build-progress.build-error {
+  color: #ff9386;
+}
+
+.build-results {
+  margin-top: 1.25rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid #30333b;
+}
+
+.build-results[hidden] {
+  display: none;
+}
+
+.build-hash {
+  max-width: 16rem;
+  overflow: hidden;
+  color: #7dc59b;
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-list {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
+.artifact-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid #343842;
+  border-radius: 0.6rem;
+  background: #1c1f26;
+}
+
+.artifact-card p {
+  margin: 0;
+}
+
+.artifact-name {
+  color: #e1e2e6;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.artifact-meta {
+  margin-top: 0.2rem !important;
+  color: #858b97;
+  font-size: 0.68rem;
+}
+
+.artifact-card .button {
+  min-width: 7rem;
+  flex: none;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -493,6 +729,26 @@ kbd {
 
   .button-subtle {
     min-width: 7rem;
+  }
+
+  .build-dialog {
+    width: calc(100% - 0.75rem);
+    max-height: calc(100vh - 0.75rem);
+  }
+
+  .build-dialog-content {
+    padding: 0.9rem;
+  }
+
+  .build-action-row,
+  .artifact-card,
+  .build-results-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .build-hash {
+    max-width: 100%;
   }
 
   .source-file {

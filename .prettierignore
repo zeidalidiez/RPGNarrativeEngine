@@ -1,5 +1,10 @@
 .cache/
 build/
+!packages/build/
+!packages/build/package.json
+!packages/build/tsconfig.json
+!packages/build/src/
+!packages/build/src/**
 coverage/
 dist/
 node_modules/

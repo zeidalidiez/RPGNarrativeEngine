@@ -28,6 +28,9 @@
           <button id="download-button" class="button button-subtle" type="button">
             Download file
           </button>
+          <button id="build-button" class="button button-build" type="button" disabled>
+            Build project
+          </button>
           <button id="run-button" class="button button-primary" type="button">
             <span aria-hidden="true">▶</span> Run story
           </button>
@@ -83,6 +86,71 @@
         </section>
       </section>
     </main>
+
+    <dialog id="build-dialog" class="build-dialog" aria-labelledby="build-heading">
+      <div class="build-dialog-shell">
+        <header class="build-dialog-header">
+          <div>
+            <p class="pane-kicker">Package your game</p>
+            <h2 id="build-heading">Build web releases</h2>
+          </div>
+          <form method="dialog">
+            <button class="dialog-close" type="submit" aria-label="Close build window">×</button>
+          </form>
+        </header>
+
+        <div class="build-dialog-content">
+          <p class="build-intro">
+            Create distributable files from the current in-memory project. These are one-run
+            choices; your <code>project.toml</code> is not rewritten.
+          </p>
+
+          <fieldset id="build-targets" class="build-targets">
+            <legend>Outputs</legend>
+            <label class="build-target" for="target-web-zip">
+              <input id="target-web-zip" type="checkbox" />
+              <span>
+                <strong>Static web ZIP</strong>
+                <small
+                  >Upload the extracted folder to GitHub Pages, itch.io, or any static host.</small
+                >
+              </span>
+            </label>
+            <label class="build-target" for="target-web-single">
+              <input id="target-web-single" type="checkbox" />
+              <span>
+                <strong>Single HTML</strong>
+                <small>One self-contained file that can be opened directly without a server.</small>
+              </span>
+            </label>
+          </fieldset>
+
+          <div class="build-action-row">
+            <button id="start-build-button" class="button button-primary" type="button">
+              Build selected outputs
+            </button>
+            <p id="build-progress" class="build-progress" role="status" aria-live="polite"></p>
+          </div>
+
+          <section
+            id="build-results"
+            class="build-results"
+            aria-labelledby="build-results-heading"
+            hidden
+          >
+            <div class="build-results-heading">
+              <div>
+                <p class="pane-kicker">Build complete</p>
+                <h3 id="build-results-heading">Ready to download</h3>
+              </div>
+              <code id="build-hash" class="build-hash"></code>
+            </div>
+            <div id="artifact-list" class="artifact-list"></div>
+          </section>
+        </div>
+      </div>
+    </dialog>
+
     <noscript>The story playground requires JavaScript.</noscript>
     <script type="module" src="./src/main.ts"></script>
   </body>

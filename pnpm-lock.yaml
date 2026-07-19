@@ -64,6 +64,9 @@ importers:
 
   apps/playground:
     dependencies:
+      '@rpgnarrativeengine/build':
+        specifier: workspace:*
+        version: link:../../packages/build
       '@rpgnarrativeengine/compiler':
         specifier: workspace:*
         version: link:../../packages/compiler
@@ -103,7 +106,17 @@ importers:
 
   packages/audio: {}
 
-  packages/build: {}
+  packages/build:
+    dependencies:
+      '@rpgnarrativeengine/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      '@rpgnarrativeengine/exporter-web':
+        specifier: workspace:*
+        version: link:../exporter-web
+      '@rpgnarrativeengine/project':
+        specifier: workspace:*
+        version: link:../project
 
   packages/cli: {}
 
@@ -124,7 +137,18 @@ importers:
 
   packages/exporter-mobile: {}
 
-  packages/exporter-web: {}
+  packages/exporter-web:
+    dependencies:
+      '@rpgnarrativeengine/ir':
+        specifier: workspace:*
+        version: link:../ir
+      '@rpgnarrativeengine/player':
+        specifier: workspace:*
+        version: link:../player
+    devDependencies:
+      vite:
+        specifier: 8.1.5
+        version: 8.1.5(@types/node@24.13.3)
 
   packages/ir: {}
 
