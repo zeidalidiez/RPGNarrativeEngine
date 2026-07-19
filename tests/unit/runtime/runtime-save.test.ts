@@ -125,4 +125,24 @@ describe('runtime saves', () => {
     expect(() => matching.loadSave(malformed)).toThrow(/outside its instruction block/u);
     expect(matching.view).toMatchObject({ kind: 'text', plainText: 'Opening' });
   });
+
+  it('restores named random streams at the exact next draw', () => {
+    const runtime = new NarrativeRuntime(game(), {
+      buildIdentity: BUILD_A,
+      randomSeed: '00000001000000020000000300000004',
+    });
+    runtime.random.nextUint32('story');
+    runtime.random.nextUint32('combat');
+    const save = runtime.serializeSave();
+    const expectedStory = Array.from({ length: 5 }, () => runtime.random.nextUint32('story'));
+    const expectedCombat = Array.from({ length: 5 }, () => runtime.random.nextUint32('combat'));
+
+    runtime.loadSave(save);
+    expect(Array.from({ length: 5 }, () => runtime.random.nextUint32('story'))).toEqual(
+      expectedStory,
+    );
+    expect(Array.from({ length: 5 }, () => runtime.random.nextUint32('combat'))).toEqual(
+      expectedCombat,
+    );
+  });
 });

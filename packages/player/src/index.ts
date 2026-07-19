@@ -8,6 +8,7 @@ import {
 export interface NarrativePlayerOptions {
   readonly initialVariables?: Readonly<Record<string, NarrativeValue>>;
   readonly onEffect?: (effect: EffectInstruction) => void;
+  readonly randomSeed?: string;
   readonly save?: NarrativePlayerSaveOptions;
 }
 
@@ -132,6 +133,7 @@ export function mountNarrativePlayer(
       ? {}
       : { initialVariables: options.initialVariables }),
     ...(options.onEffect === undefined ? {} : { onEffect: options.onEffect }),
+    ...(options.randomSeed === undefined ? {} : { randomSeed: options.randomSeed }),
     ...(options.save === undefined ? {} : { buildIdentity: options.save.buildIdentity }),
   };
   const runtime = new NarrativeRuntime(game, runtimeOptions);

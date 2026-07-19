@@ -9,6 +9,31 @@ import type {
   NarrativeValue,
 } from '@rpgnarrativeengine/ir';
 
+import {
+  DEFAULT_RANDOM_SEED,
+  NamedRandom,
+  parseNamedRandomSnapshot,
+  parseRandomSeed,
+  type NamedRandomSnapshot,
+  type RandomSeed,
+} from './random.js';
+
+export {
+  DEFAULT_RANDOM_SEED,
+  RANDOM_ALGORITHM,
+  RANDOM_ALGORITHM_VERSION,
+  RANDOM_SNAPSHOT_FORMAT,
+  RANDOM_SNAPSHOT_VERSION,
+  DeterministicRandomError,
+  NamedRandom,
+  isRandomStreamName,
+  parseNamedRandomSnapshot,
+  parseRandomSeed,
+  type NamedRandomSnapshot,
+  type RandomSeed,
+  type RandomStreamSnapshot,
+} from './random.js';
+
 export type ResolvedInline =
   | { readonly kind: 'text'; readonly value: string }
   | { readonly kind: 'line-break' }
@@ -91,6 +116,7 @@ export interface NarrativeSave {
     readonly calls: readonly RuntimeCallSave[];
     readonly view: RuntimeView;
     readonly pendingChoiceIds: readonly string[];
+    readonly random: NamedRandomSnapshot;
   };
 }
 
@@ -100,6 +126,8 @@ export interface RuntimeOptions {
   readonly stepBudget?: number;
   /** Exact canonical game-bundle hash used to reject saves from another build. */
   readonly buildIdentity?: string;
+  /** Canonical 128-bit seed; hosts may generate one once at the start of a new playthrough. */
+  readonly randomSeed?: string;
 }
 
 interface Frame {
@@ -139,7 +167,11 @@ function requireNumber(value: NarrativeValue, context: string): number {
   return value;
 }
 
-function callFunction(name: string, values: readonly NarrativeValue[]): NarrativeValue {
+function callFunction(
+  name: string,
+  values: readonly NarrativeValue[],
+  random: NamedRandom,
+): NarrativeValue {
   const numbers = (): number[] => values.map((value) => requireNumber(value, `Function ${name}`));
   if (name === 'min' || name === 'max') {
     const operands = numbers();
@@ -176,6 +208,26 @@ function callFunction(name: string, values: readonly NarrativeValue[]): Narrativ
       throw new NarrativeRuntimeError('Function length expects one string argument.');
     }
     return [...values[0]].length;
+  }
+  if (name === 'random') {
+    if (values.length === 0) return random.nextFloat('story');
+    if (values.length !== 2) {
+      throw new NarrativeRuntimeError('Function random expects zero or two arguments.');
+    }
+    const minimum = requireNumber(values[0]!, 'Function random');
+    const maximum = requireNumber(values[1]!, 'Function random');
+    const span = maximum - minimum;
+    if (
+      !Number.isFinite(minimum) ||
+      !Number.isFinite(maximum) ||
+      minimum >= maximum ||
+      !Number.isFinite(span)
+    ) {
+      throw new NarrativeRuntimeError(
+        'Function random expects finite minimum and before values with minimum < before.',
+      );
+    }
+    return random.range('story', minimum, maximum);
   }
   throw new NarrativeRuntimeError(`Unknown expression function ${JSON.stringify(name)}.`);
 }
@@ -449,6 +501,10 @@ export function parseNarrativeSave(input: unknown): NarrativeSave {
       calls,
       view: parseSaveView(state['view']),
       pendingChoiceIds,
+      random:
+        state['random'] === undefined
+          ? new NamedRandom(buildIdentity.slice(0, 32)).snapshot()
+          : parseNamedRandomSnapshot(state['random']),
     }),
   });
 }
@@ -457,8 +513,10 @@ export function parseNarrativeSave(input: unknown): NarrativeSave {
 export class NarrativeRuntime {
   readonly game: CompiledGame;
   readonly variables: Record<string, NarrativeValue>;
+  readonly random: NamedRandom;
 
   private readonly initialVariables: Readonly<Record<string, NarrativeValue>>;
+  private readonly initialRandomSeed: RandomSeed;
   private readonly onEffect: ((effect: EffectInstruction) => void) | undefined;
   private readonly stepBudget: number;
   private readonly buildIdentity: string | undefined;
@@ -482,6 +540,10 @@ export class NarrativeRuntime {
       throw new NarrativeRuntimeError('Runtime buildIdentity must be a lowercase SHA-256 hash.');
     }
     this.buildIdentity = options.buildIdentity;
+    this.initialRandomSeed = parseRandomSeed(
+      options.randomSeed ?? options.buildIdentity?.slice(0, 32) ?? DEFAULT_RANDOM_SEED,
+    );
+    this.random = new NamedRandom(this.initialRandomSeed);
     this.restart();
   }
 
@@ -507,6 +569,7 @@ export class NarrativeRuntime {
       delete this.variables[key];
     }
     Object.assign(this.variables, this.initialVariables);
+    this.random.reset(this.initialRandomSeed);
     this.enterScene(this.game.startSceneId);
     this.advance();
     return this.view;
@@ -587,6 +650,7 @@ export class NarrativeRuntime {
         })),
         view: this.view,
         pendingChoiceIds: this.pendingChoices.map((choice) => choice.id),
+        random: this.random.snapshot(),
       },
     });
   }
@@ -700,6 +764,7 @@ export class NarrativeRuntime {
       }
     }
 
+    this.random.restore(state.random);
     this.frames = frames;
     this.calls = calls;
     this.currentSceneId = state.sceneId;
@@ -790,6 +855,7 @@ export class NarrativeRuntime {
         return callFunction(
           expression.name,
           expression.arguments.map((argument) => this.evaluate(argument)),
+          this.random,
         );
       case 'binary': {
         const left = this.evaluate(expression.left);

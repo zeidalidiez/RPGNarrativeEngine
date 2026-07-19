@@ -58,10 +58,24 @@ function saveOptions(root: HTMLElement): NarrativePlayerSaveOptions | undefined 
   }
 }
 
+function newPlaythroughSeed(): string | undefined {
+  try {
+    const words = new Uint32Array(4);
+    globalThis.crypto.getRandomValues(words);
+    return [...words].map((word) => word.toString(16).padStart(8, '0')).join('');
+  } catch {
+    return undefined;
+  }
+}
+
 const root = playerRoot();
 void loadGame(root)
   .then((game) => {
     const save = saveOptions(root);
-    return mountNarrativePlayer(root, game, save === undefined ? {} : { save });
+    const randomSeed = newPlaythroughSeed();
+    return mountNarrativePlayer(root, game, {
+      ...(save === undefined ? {} : { save }),
+      ...(randomSeed === undefined ? {} : { randomSeed }),
+    });
   })
   .catch((error: unknown) => showLoadFailure(root, error));

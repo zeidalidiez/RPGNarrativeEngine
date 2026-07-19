@@ -1,6 +1,6 @@
 # C-03: Expression contract
 
-Status: Lexical forms, Lezer parser, normalized AST, operator/function metadata, and executable primitive semantics implemented; resolver, type checker, and seeded RNG adapter pending
+Status: Lexical forms, Lezer parser, normalized AST, operator/function metadata, executable primitive semantics, and the serialized story RNG adapter implemented; resolver and type checker pending
 
 Expressions are a closed, typed language. They cannot access JavaScript globals, properties, prototypes, the DOM, filesystem, clock, network, or arbitrary functions.
 
@@ -59,7 +59,7 @@ String literals use the C-02 quoted-string escapes and do not interpolate. `{{ e
 | `random` | `() -> number`                       | Draw from the serialized `story` stream in `[0, 1)`.                                         |
 | `random` | `(minimum, before) -> number`        | One `story`-stream draw scaled to `[minimum, before)`; requires finite `minimum < before`.   |
 
-The first five functions are pure and implemented by `evaluatePureStandardFunction`. `random` is metadata-only until C-08 publishes the exact xoshiro vectors and draw conversion; no temporary `Math.random` implementation is allowed.
+The first five functions are pure and implemented by `evaluatePureStandardFunction`. `random` executes in the runtime through the serialized C-08 `story` stream; it never delegates to `Math.random`.
 
 ## Names and extension points
 
@@ -75,4 +75,4 @@ Plugins register function signatures containing parameter/result types and deter
 - `tests/fixtures/language/expression-vectors.json` covers strict arithmetic, comparison, equality, concatenation, rounding, clamping, and Unicode length.
 - Unit tests prove parser precedence/recovery, immutable AST normalization and source spans, literal validation, short-circuit behavior, no coercion, zero-divisor errors, finite-result enforcement, and seeded-random metadata.
 
-The type checker must add source-aware success and failure fixtures before C-03 is treated as complete. C-08 must add exact random output/draw-count vectors before `random` can execute.
+The type checker must add source-aware success and failure fixtures before C-03 is treated as complete. Exact random output, state, isolation, and draw-count vectors live in `tests/determinism/random.test.ts`.
