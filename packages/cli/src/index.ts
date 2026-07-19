@@ -11,6 +11,7 @@ import {
   type FileHandle,
 } from 'node:fs/promises';
 import path from 'node:path';
+import { setTimeout as wait } from 'node:timers/promises';
 
 import {
   buildWebProject,
@@ -52,6 +53,7 @@ export class FilesystemBuildError extends Error {
 const ignoredProjectDirectories = new Set(['.git', '.rpgne', 'node_modules']);
 const stagingMarkerFilename = '.rpgne-staging.json';
 const nativeTargets = new Set<ProjectBuildTarget>(['android', 'ios', 'linux', 'macos', 'windows']);
+const transientRenameErrorCodes = new Set(['EACCES', 'EBUSY', 'ENOTEMPTY', 'EPERM']);
 
 function isMissingPath(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
@@ -59,6 +61,25 @@ function isMissingPath(error: unknown): boolean {
 
 function isExistingPath(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'EEXIST';
+}
+
+function isTransientRenameError(error: unknown): boolean {
+  if (!(error instanceof Error) || !('code' in error)) return false;
+  return transientRenameErrorCodes.has(String(error.code));
+}
+
+async function renameWithRetry(source: string, destination: string): Promise<void> {
+  const retryDelays = [25, 50, 100, 200, 400, 800, 1600] as const;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rename(source, destination);
+      return;
+    } catch (error) {
+      const delay = retryDelays[attempt];
+      if (delay === undefined || !isTransientRenameError(error)) throw error;
+      await wait(delay);
+    }
+  }
 }
 
 async function pathExists(candidate: string): Promise<boolean> {
@@ -269,16 +290,16 @@ async function promoteBuild(
     await verifyOutputOwnership(backupDirectory, projectId);
     if (outputExists) await removeOwnedDirectory(backupDirectory, projectRoot);
     else {
-      await rename(backupDirectory, outputDirectory);
+      await renameWithRetry(backupDirectory, outputDirectory);
       outputExists = true;
     }
   }
-  if (outputExists) await rename(outputDirectory, backupDirectory);
+  if (outputExists) await renameWithRetry(outputDirectory, backupDirectory);
   try {
-    await rename(stagingDirectory, outputDirectory);
+    await renameWithRetry(stagingDirectory, outputDirectory);
   } catch (error) {
     if (outputExists && (await pathExists(backupDirectory))) {
-      await rename(backupDirectory, outputDirectory);
+      await renameWithRetry(backupDirectory, outputDirectory);
     }
     throw new FilesystemBuildError('Could not promote the staged build output.', {
       cause: error,
