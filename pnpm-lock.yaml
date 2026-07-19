@@ -70,6 +70,9 @@ importers:
       '@rpgnarrativeengine/player':
         specifier: workspace:*
         version: link:../../packages/player
+      '@rpgnarrativeengine/project':
+        specifier: workspace:*
+        version: link:../../packages/project
 
   examples/showcase:
     dependencies:

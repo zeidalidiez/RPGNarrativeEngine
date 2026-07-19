@@ -25,7 +25,8 @@ body {
 }
 
 button,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -130,6 +131,7 @@ button {
 
 .button:focus-visible,
 .text-button:focus-visible,
+.source-file:focus-visible,
 .diagnostic:focus-visible,
 .nre-button:focus-visible {
   outline: 3px solid rgba(240, 168, 75, 0.42);
@@ -177,6 +179,26 @@ button {
   font-weight: 800;
   letter-spacing: 0.15em;
   text-transform: uppercase;
+}
+
+.source-heading {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.source-file {
+  width: min(24rem, 42vw);
+  min-height: 2rem;
+  padding: 0.3rem 2rem 0.3rem 0.55rem;
+  overflow: hidden;
+  border: 1px solid #363a44;
+  border-radius: 0.4rem;
+  color: #d9dbe1;
+  background: #20232b;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
 }
 
 .pane-header h2 {
@@ -292,7 +314,7 @@ kbd {
 .diagnostic {
   display: grid;
   width: 100%;
-  grid-template-columns: 3.8rem 1fr;
+  grid-template-columns: minmax(7rem, 12rem) 1fr;
   gap: 0.6rem;
   padding: 0.55rem;
   border: 0;
@@ -310,8 +332,11 @@ kbd {
 }
 
 .diagnostic-location {
+  overflow: hidden;
   color: #ff8e80;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .player-mount {
@@ -468,6 +493,10 @@ kbd {
 
   .button-subtle {
     min-width: 7rem;
+  }
+
+  .source-file {
+    width: min(15rem, 58vw);
   }
 
   .player-mount {

@@ -21,21 +21,36 @@
           </div>
         </div>
         <div class="header-actions">
+          <button id="project-button" class="button button-subtle" type="button">
+            Open project
+          </button>
           <button id="open-button" class="button button-subtle" type="button">Open .story</button>
-          <button id="download-button" class="button button-subtle" type="button">Download</button>
+          <button id="download-button" class="button button-subtle" type="button">
+            Download file
+          </button>
           <button id="run-button" class="button button-primary" type="button">
             <span aria-hidden="true">▶</span> Run story
           </button>
           <input id="file-input" type="file" accept=".story,text/plain" hidden />
+          <input
+            id="project-input"
+            type="file"
+            accept=".toml,.story,text/plain"
+            webkitdirectory
+            multiple
+            hidden
+          />
         </div>
       </header>
 
       <section class="workspace" aria-label="Story authoring playground">
         <section class="editor-pane" aria-labelledby="source-heading">
           <div class="pane-header">
-            <div>
-              <p class="pane-kicker">Source</p>
-              <h2 id="source-heading">main.story</h2>
+            <div class="source-heading">
+              <p id="project-name" class="pane-kicker">Scratch story</p>
+              <h2 id="source-heading" class="sr-only">Project source</h2>
+              <label class="sr-only" for="source-file">Open source file</label>
+              <select id="source-file" class="source-file" aria-describedby="project-name"></select>
             </div>
             <button id="reset-button" class="text-button" type="button">Reset example</button>
           </div>

@@ -7,7 +7,8 @@
   "type": "module",
   "dependencies": {
     "@rpgnarrativeengine/compiler": "workspace:*",
-    "@rpgnarrativeengine/player": "workspace:*"
+    "@rpgnarrativeengine/player": "workspace:*",
+    "@rpgnarrativeengine/project": "workspace:*"
   },
   "scripts": {
     "build": "vite build --config ../../vite.app.config.ts",

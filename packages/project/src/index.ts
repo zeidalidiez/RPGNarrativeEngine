@@ -82,6 +82,8 @@ export interface LoadedNarrativeProject {
   readonly rootName: string | null;
   readonly manifest: ProjectManifest;
   readonly manifestSource: string;
+  /** All text files supplied beneath the selected project root, in canonical path order. */
+  readonly files: readonly ProjectFileInput[];
   readonly storyFiles: readonly LoadedProjectStoryFile[];
 }
 
@@ -653,6 +655,11 @@ export function loadNarrativeProject(files: readonly ProjectFileInput[]): Loaded
     rootName,
     manifest,
     manifestSource,
+    files: Object.freeze(
+      [...relativeFiles.entries()]
+        .sort(([left], [right]) => compareUnicodeCodePoints(left, right))
+        .map(([path, content]) => Object.freeze({ path, content })),
+    ),
     storyFiles: Object.freeze(
       storyPaths.map((path) => Object.freeze({ path, source: relativeFiles.get(path)! })),
     ),
