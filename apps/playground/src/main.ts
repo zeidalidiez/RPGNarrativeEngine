@@ -11,7 +11,11 @@ import {
   StoryCompileError,
   type CompileIssue,
 } from '@rpgnarrativeengine/compiler';
-import { renameStoryScene } from '@rpgnarrativeengine/editor-source';
+import {
+  deleteStoryScene,
+  duplicateStoryScene,
+  renameStoryScene,
+} from '@rpgnarrativeengine/editor-source';
 import { mountNarrativePlayer, type NarrativePlayerController } from '@rpgnarrativeengine/player';
 import {
   loadNarrativeProject,
@@ -19,6 +23,12 @@ import {
   type ProjectFileInput,
 } from '@rpgnarrativeengine/project';
 
+import {
+  EDITOR_METADATA_PATH,
+  parseStoryMapLayout,
+  serializeStoryMapLayout,
+  type StoryMapPosition,
+} from './editor-metadata.js';
 import { renameProjectEntryScene } from './project-source.js';
 import starterStory from './starter.story?raw';
 import { StoryMapEditor, type StoryMapElements } from './story-map.js';
@@ -26,6 +36,7 @@ import { StructuredSceneEditor, type StructuredEditorElements } from './structur
 import './style.css';
 
 const STORAGE_KEY = 'rpgnarrativeengine.playground.story';
+const LAYOUT_STORAGE_KEY = 'rpgnarrativeengine.playground.story-map';
 
 interface EditorFile {
   path: string;
@@ -98,9 +109,12 @@ const structuredEditorElements: StructuredEditorElements = {
 };
 const storyMapElements: StoryMapElements = {
   canvas: required<HTMLElement>('#story-map-canvas'),
+  downloadLayout: required<HTMLButtonElement>('#story-map-download-layout-button'),
   newScene: required<HTMLButtonElement>('#story-map-new-scene-button'),
+  resetLayout: required<HTMLButtonElement>('#story-map-reset-layout-button'),
   status: required<HTMLElement>('#story-map-status'),
   summary: required<HTMLElement>('#story-map-summary'),
+  viewport: required<HTMLElement>('.story-map-viewport'),
 };
 
 let controller: NarrativePlayerController | null = null;
@@ -126,6 +140,75 @@ function saveScratchSource(source: string): void {
   }
 }
 
+function scratchLayoutSource(): string | null {
+  try {
+    return localStorage.getItem(LAYOUT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function editorMetadataFile(): EditorFile | undefined {
+  return session.files.find((file) => file.path === EDITOR_METADATA_PATH);
+}
+
+function editorMetadataSource(): string | null {
+  return session.kind === 'scratch'
+    ? scratchLayoutSource()
+    : (editorMetadataFile()?.content ?? null);
+}
+
+function storyMapLayout(): {
+  readonly positions: Readonly<Record<string, StoryMapPosition>>;
+  readonly issue: string | null;
+} {
+  try {
+    return { positions: parseStoryMapLayout(editorMetadataSource()).positions, issue: null };
+  } catch (error) {
+    return {
+      positions: Object.freeze({}),
+      issue: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function saveStoryMapLayout(
+  positions: Readonly<Record<string, StoryMapPosition>>,
+  replaceInvalid = false,
+): void {
+  const source = serializeStoryMapLayout(replaceInvalid ? null : editorMetadataSource(), positions);
+  if (session.kind === 'scratch') {
+    try {
+      localStorage.setItem(LAYOUT_STORAGE_KEY, source);
+    } catch {
+      throw new Error('The Story Map layout could not be stored in this browser.');
+    }
+    return;
+  }
+  const current = editorMetadataFile();
+  if (current === undefined) session.files.push({ path: EDITOR_METADATA_PATH, content: source });
+  else current.content = source;
+}
+
+function clearStoryMapLayout(): void {
+  saveStoryMapLayout(Object.freeze({}), true);
+}
+
+function updateLifecycleLayout(
+  mutator: (positions: Record<string, StoryMapPosition>) => void,
+): string {
+  const layout = storyMapLayout();
+  if (layout.issue !== null) return ` Layout metadata was not updated: ${layout.issue}`;
+  try {
+    const positions = { ...layout.positions };
+    mutator(positions);
+    saveStoryMapLayout(positions);
+    return '';
+  } catch (error) {
+    return ` Layout metadata was not updated: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
 function currentFile(): EditorFile {
   const file = session.files.find((candidate) => candidate.path === activePath);
   if (file === undefined)
@@ -144,7 +227,7 @@ function sourcePosition(
 
 function updateStats(): void {
   const lineCount = editor.value.length === 0 ? 0 : editor.value.split(/\r\n|\n/u).length;
-  const fileCount = session.files.length;
+  const fileCount = session.files.filter((file) => file.path !== EDITOR_METADATA_PATH).length;
   sourceStats.textContent = `${lineCount} ${lineCount === 1 ? 'line' : 'lines'} \u00b7 ${editor.value.length} characters${fileCount > 1 ? ` \u00b7 ${fileCount} files` : ''}`;
 }
 
@@ -180,7 +263,7 @@ function markBuildStale(): void {
 
 function refreshFileSelector(): void {
   sourceFile.replaceChildren();
-  for (const file of session.files) {
+  for (const file of session.files.filter((candidate) => candidate.path !== EDITOR_METADATA_PATH)) {
     const option = document.createElement('option');
     option.value = file.path;
     option.textContent = file.path;
@@ -234,7 +317,7 @@ function updateStructuredFiles(
   updateStats();
 }
 
-function renameProjectScene(from: string, to: string): void {
+function renameProjectScene(from: string, to: string): string {
   const storyUpdates = renameStoryScene(
     session.files
       .filter((file) => file.path.endsWith('.story'))
@@ -249,6 +332,53 @@ function renameProjectScene(from: string, to: string): void {
     if (source !== manifest.content) updates.push({ path: manifest.path, source });
   }
   updateStructuredFiles(updates);
+  return updateLifecycleLayout((positions) => {
+    const current = positions[from];
+    delete positions[from];
+    if (current !== undefined) positions[to] = current;
+  });
+}
+
+function duplicateProjectScene(
+  from: string,
+  to: string,
+  targetPath: string,
+  retargetSelfReferences: boolean,
+): string {
+  const updates = duplicateStoryScene(
+    session.files
+      .filter((file) => file.path.endsWith('.story'))
+      .map((file) => ({ path: file.path, source: file.content })),
+    { from, to, targetPath, retargetSelfReferences },
+  );
+  updateStructuredFiles(updates, targetPath);
+  return updateLifecycleLayout((positions) => {
+    const current = positions[from];
+    if (current !== undefined) positions[to] = { x: current.x + 36, y: current.y + 36 };
+  });
+}
+
+function deleteProjectScene(sceneId: string, replacementId: string): string {
+  const storyUpdates = deleteStoryScene(
+    session.files
+      .filter((file) => file.path.endsWith('.story'))
+      .map((file) => ({ path: file.path, source: file.content })),
+    sceneId,
+    replacementId,
+  );
+  const updates = [...storyUpdates];
+  const manifest = session.files.find((file) => file.path === 'project.toml');
+  if (manifest !== undefined) {
+    const source = renameProjectEntryScene(manifest.content, sceneId, replacementId);
+    if (source !== manifest.content) updates.push({ path: manifest.path, source });
+  }
+  const replacementPath = session.files.find(
+    (file) => file.path.endsWith('.story') && storyFileDeclaresScene(file.content, replacementId),
+  )?.path;
+  updateStructuredFiles(updates, replacementPath ?? activePath);
+  return updateLifecycleLayout((positions) => {
+    delete positions[sceneId];
+  });
 }
 
 function openAdvancedSource(path: string, from = 0, to = from): void {
@@ -567,7 +697,13 @@ function storyFileDeclaresScene(source: string, sceneId: string): boolean {
 async function openProjectSelection(fileList: FileList): Promise<void> {
   const readable = [...fileList].filter((file) => {
     const path = selectedPath(file);
-    return path.endsWith('/project.toml') || path === 'project.toml' || path.endsWith('.story');
+    return (
+      path.endsWith('/project.toml') ||
+      path === 'project.toml' ||
+      path.endsWith('.story') ||
+      path.endsWith(`/${EDITOR_METADATA_PATH}`) ||
+      path === EDITOR_METADATA_PATH
+    );
   });
   const files: ProjectFileInput[] = await Promise.all(
     readable.map(async (file) => ({ path: selectedPath(file), content: await file.text() })),
@@ -611,6 +747,8 @@ structuredEditor = new StructuredSceneEditor(
   {
     files: () => session.files,
     updateFile: updateStructuredFile,
+    deleteScene: deleteProjectScene,
+    duplicateScene: duplicateProjectScene,
     renameScene: renameProjectScene,
     selectFile(path) {
       const file = session.files.find((candidate) => candidate.path === path);
@@ -628,7 +766,16 @@ structuredEditor = new StructuredSceneEditor(
 storyMap = new StoryMapEditor(
   {
     files: () => session.files,
+    clearLayout: clearStoryMapLayout,
+    deleteScene: deleteProjectScene,
+    downloadLayout() {
+      const source = serializeStoryMapLayout(editorMetadataSource(), storyMapLayout().positions);
+      downloadFile('editor.json', 'application/json;charset=utf-8', source);
+    },
+    duplicateScene: duplicateProjectScene,
+    layout: storyMapLayout,
     updateFile: updateStructuredFile,
+    updateLayout: saveStoryMapLayout,
     renameScene: renameProjectScene,
     openScene(path, sceneId) {
       setAuthoringMode('visual');
@@ -717,6 +864,11 @@ resetButton.addEventListener('click', () => {
     return;
   }
   saveScratchSource(starterStory);
+  try {
+    localStorage.removeItem(LAYOUT_STORAGE_KEY);
+  } catch {
+    // Resetting the story still works when browser storage is unavailable.
+  }
   setSession({
     kind: 'scratch',
     name: 'Scratch story',

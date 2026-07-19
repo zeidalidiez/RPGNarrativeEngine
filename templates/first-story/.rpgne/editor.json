@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "storyMap": {
+    "positions": {
+      "crossroads.arrival": {
+        "x": 36,
+        "y": 36
+      },
+      "crossroads.ridge": {
+        "x": 792,
+        "y": 36
+      },
+      "crossroads.river": {
+        "x": 414,
+        "y": 36
+      },
+      "ending.beyond": {
+        "x": 1170,
+        "y": 36
+      },
+      "ending.shrine": {
+        "x": 792,
+        "y": 384
+      },
+      "ending.valley": {
+        "x": 1170,
+        "y": 384
+      }
+    }
+  }
+}

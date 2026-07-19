@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   applyStorySourceEdit,
   applyStorySourceEdits,
+  deleteStoryScene,
+  duplicateStoryScene,
   parseEditableStory,
   renameStoryScene,
   StorySourceEditError,
@@ -90,5 +92,64 @@ describe('visual story source transactions', () => {
         'second',
       ),
     ).toThrow('Scene second already exists.');
+  });
+
+  it('duplicates a scene into another file with self-links and content IDs safely copied', () => {
+    const updates = duplicateStoryScene(
+      [
+        {
+          path: 'story/main.story',
+          source:
+            ':: source\nOpening. ^source.line\n* Loop -> source ^source.choice\n@goto ending\n',
+        },
+        {
+          path: 'story/endings.story',
+          source: ':: ending\nDone.\n@ending done "Done"\n',
+        },
+      ],
+      {
+        from: 'source',
+        to: 'source.copy',
+        targetPath: 'story/endings.story',
+      },
+    );
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.path).toBe('story/endings.story');
+    expect(updates[0]?.source).toContain(':: source.copy');
+    expect(updates[0]?.source).toContain('* Loop -> source.copy ^source.choice.copy');
+    expect(updates[0]?.source).toContain('Opening. ^source.line.copy');
+    expect(updates[0]?.source).toContain('@goto ending');
+  });
+
+  it('deletes a scene and redirects surviving nested references atomically', () => {
+    const updates = deleteStoryScene(
+      [
+        {
+          path: 'story/main.story',
+          source:
+            ':: opening\n* Visit -> removed\n@if ready\n  @call removed\n@else\n  @goto removed\n@end\n',
+        },
+        {
+          path: 'story/removed.story',
+          source: ':: removed\nRemoved.\n@ending old "Old"\n',
+        },
+        {
+          path: 'story/replacement.story',
+          source: ':: replacement\nReplacement.\n@ending new "New"\n',
+        },
+      ],
+      'removed',
+      'replacement',
+    );
+
+    expect(updates).toHaveLength(2);
+    expect(updates.find((update) => update.path === 'story/main.story')?.source).not.toContain(
+      'removed',
+    );
+    expect(updates.find((update) => update.path === 'story/main.story')?.source).toContain(
+      '* Visit -> replacement',
+    );
+    expect(updates.find((update) => update.path === 'story/removed.story')?.source).toBe('');
   });
 });

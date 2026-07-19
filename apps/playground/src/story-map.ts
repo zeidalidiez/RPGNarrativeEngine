@@ -6,6 +6,8 @@ import {
   type StorySceneAst,
 } from '@rpgnarrativeengine/editor-source';
 
+import type { StoryMapPosition } from './editor-metadata.js';
+
 export interface StoryMapFile {
   readonly path: string;
   readonly content: string;
@@ -13,17 +15,34 @@ export interface StoryMapFile {
 
 export interface StoryMapHost {
   readonly files: () => readonly StoryMapFile[];
+  readonly clearLayout: () => void;
+  readonly deleteScene: (sceneId: string, replacementId: string) => string;
+  readonly downloadLayout: () => void;
+  readonly duplicateScene: (
+    from: string,
+    to: string,
+    targetPath: string,
+    retargetSelfReferences: boolean,
+  ) => string;
+  readonly layout: () => {
+    readonly positions: Readonly<Record<string, StoryMapPosition>>;
+    readonly issue: string | null;
+  };
   readonly updateFile: (path: string, source: string) => void;
-  readonly renameScene: (from: string, to: string) => void;
+  readonly updateLayout: (positions: Readonly<Record<string, StoryMapPosition>>) => void;
+  readonly renameScene: (from: string, to: string) => string;
   readonly openScene: (path: string, sceneId: string) => void;
   readonly preview: () => void;
 }
 
 export interface StoryMapElements {
   readonly canvas: HTMLElement;
+  readonly downloadLayout: HTMLButtonElement;
   readonly newScene: HTMLButtonElement;
+  readonly resetLayout: HTMLButtonElement;
   readonly status: HTMLElement;
   readonly summary: HTMLElement;
+  readonly viewport: HTMLElement;
 }
 
 interface StoryMapRecord {
@@ -48,7 +67,8 @@ interface StoryMapEdge {
   readonly targetTo: number;
   readonly itemFrom: number;
   readonly itemTo: number;
-  readonly nested: boolean;
+  readonly removable: boolean;
+  readonly removeReason: string | null;
 }
 
 interface PositionedNode extends StoryMapNode {
@@ -57,7 +77,7 @@ interface PositionedNode extends StoryMapNode {
 }
 
 const NODE_WIDTH = 292;
-const NODE_HEIGHT = 268;
+const NODE_HEIGHT = 304;
 const COLUMN_GAP = 86;
 const ROW_GAP = 44;
 
@@ -113,6 +133,7 @@ function collectEdges(
   sourceId: string,
   items: readonly StoryItemAst[],
   edges: StoryMapEdge[],
+  removable = true,
 ): void {
   for (const item of items) {
     if (item.kind === 'choice') {
@@ -127,13 +148,21 @@ function collectEdges(
           targetTo: item.targetSpan.end.offset,
           itemFrom: itemLineStart(item),
           itemTo: item.span.end.offset,
-          nested: item.span.start.column > 1,
+          removable,
+          removeReason: removable
+            ? null
+            : 'A branch must keep at least one card. Open the scene to replace this connection.',
         });
       }
-      collectEdges(path, sourceId, item.body, edges);
+      const body = editableItems(item.body);
+      collectEdges(path, sourceId, item.body, edges, body.length > 1);
     } else if (item.kind === 'conditional') {
-      collectEdges(path, sourceId, item.thenBranch, edges);
-      if (item.elseBranch !== null) collectEdges(path, sourceId, item.elseBranch, edges);
+      const thenItems = editableItems(item.thenBranch);
+      collectEdges(path, sourceId, item.thenBranch, edges, thenItems.length > 1);
+      if (item.elseBranch !== null) {
+        const elseItems = editableItems(item.elseBranch);
+        collectEdges(path, sourceId, item.elseBranch, edges, elseItems.length > 1);
+      }
     } else if (
       item.kind === 'command' &&
       (String(item.name) === 'goto' || String(item.name) === 'call') &&
@@ -151,7 +180,10 @@ function collectEdges(
         targetTo: item.argumentsSpan.end.offset,
         itemFrom: itemLineStart(item),
         itemTo: item.span.end.offset,
-        nested: item.span.start.column > 1,
+        removable,
+        removeReason: removable
+          ? null
+          : 'A branch must keep at least one card. Open the scene to replace this connection.',
       });
     }
   }
@@ -160,6 +192,7 @@ function collectEdges(
 function layoutNodes(
   nodes: readonly StoryMapNode[],
   edges: readonly StoryMapEdge[],
+  saved: Readonly<Record<string, StoryMapPosition>>,
 ): PositionedNode[] {
   if (nodes.length === 0) return [];
   const known = new Set(nodes.map((node) => node.id));
@@ -190,11 +223,13 @@ function layoutNodes(
     const level = levels.get(node.id) ?? 0;
     const row = rows.get(level) ?? 0;
     rows.set(level, row + 1);
-    return {
+    const automatic = {
       ...node,
       x: 36 + level * (NODE_WIDTH + COLUMN_GAP),
       y: 36 + row * (NODE_HEIGHT + ROW_GAP),
     };
+    const position = saved[node.id];
+    return position === undefined ? automatic : { ...automatic, x: position.x, y: position.y };
   });
 }
 
@@ -202,12 +237,26 @@ export class StoryMapEditor {
   private records: StoryMapRecord[] = [];
   private nodes: StoryMapNode[] = [];
   private edges: StoryMapEdge[] = [];
+  private positions = new Map<string, PositionedNode>();
 
   constructor(
     private readonly host: StoryMapHost,
     private readonly elements: StoryMapElements,
   ) {
     elements.newScene.addEventListener('click', () => this.openNewSceneDialog());
+    elements.resetLayout.addEventListener('click', () =>
+      this.guard(() => {
+        this.host.clearLayout();
+        this.refresh();
+        this.setStatus('Automatic Story Map layout restored.');
+      }),
+    );
+    elements.downloadLayout.addEventListener('click', () =>
+      this.guard(() => {
+        this.host.downloadLayout();
+        this.setStatus('Downloaded editor.json. Place it at .rpgne/editor.json in the project.');
+      }),
+    );
   }
 
   refresh(): void {
@@ -234,9 +283,14 @@ export class StoryMapEditor {
     const missing = this.edges.filter(
       (edge) => !this.nodes.some((node) => node.id === edge.targetId),
     ).length;
-    this.elements.summary.textContent = `${this.nodes.length} scene${this.nodes.length === 1 ? '' : 's'} · ${this.edges.length} connection${this.edges.length === 1 ? '' : 's'}${missing === 0 ? '' : ` · ${missing} missing target${missing === 1 ? '' : 's'}`}`;
+    const layout = this.host.layout();
+    this.elements.summary.textContent = `${this.nodes.length} scene${this.nodes.length === 1 ? '' : 's'} · ${this.edges.length} connection${this.edges.length === 1 ? '' : 's'}${missing === 0 ? '' : ` · ${missing} missing target${missing === 1 ? '' : 's'}`}${Object.keys(layout.positions).length === 0 ? '' : ' · custom layout'}`;
     this.elements.newScene.disabled = this.records.length === 0;
+    this.elements.downloadLayout.disabled = layout.issue !== null;
     this.render();
+    if (layout.issue !== null) {
+      this.setStatus(`${layout.issue} Automatic layout is in use until metadata is reset.`, true);
+    }
   }
 
   private setStatus(message: string, error = false): void {
@@ -278,13 +332,13 @@ export class StoryMapEditor {
       return;
     }
 
-    const positioned = layoutNodes(this.nodes, this.edges);
+    const positioned = layoutNodes(this.nodes, this.edges, this.host.layout().positions);
+    this.positions = new Map(positioned.map((node) => [node.id, node]));
     const maximumX = Math.max(...positioned.map((node) => node.x)) + NODE_WIDTH + 40;
     const maximumY = Math.max(...positioned.map((node) => node.y)) + NODE_HEIGHT + 40;
     this.elements.canvas.style.width = `${maximumX}px`;
     this.elements.canvas.style.height = `${maximumY}px`;
-    const positions = new Map(positioned.map((node) => [node.id, node]));
-    this.elements.canvas.append(this.renderEdges(positions, maximumX, maximumY));
+    this.elements.canvas.append(this.renderEdges(this.positions, maximumX, maximumY));
     for (const node of positioned) this.elements.canvas.append(this.renderNode(node));
   }
 
@@ -334,6 +388,74 @@ export class StoryMapEditor {
     return svg;
   }
 
+  private updateLayout(mutator: (positions: Record<string, StoryMapPosition>) => void): void {
+    const layout = this.host.layout();
+    if (layout.issue !== null) throw new StorySourceEditError(layout.issue);
+    const positions = { ...layout.positions };
+    mutator(positions);
+    this.host.updateLayout(positions);
+  }
+
+  private setNodePosition(sceneId: string, position: StoryMapPosition | null): void {
+    this.updateLayout((positions) => {
+      if (position === null) delete positions[sceneId];
+      else positions[sceneId] = position;
+    });
+  }
+
+  private attachNodeDragging(
+    article: HTMLElement,
+    handle: HTMLElement,
+    node: PositionedNode,
+  ): void {
+    handle.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || (event.target as Element).closest('button, input, select, a')) {
+        return;
+      }
+      event.preventDefault();
+      const origin = this.positions.get(node.id) ?? node;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      let x = origin.x;
+      let y = origin.y;
+      article.classList.add('story-map-node-dragging');
+      article.setPointerCapture(event.pointerId);
+
+      const move = (moveEvent: PointerEvent): void => {
+        if (moveEvent.pointerId !== event.pointerId) return;
+        x = Math.max(16, Math.round(origin.x + moveEvent.clientX - startX));
+        y = Math.max(16, Math.round(origin.y + moveEvent.clientY - startY));
+        article.style.left = `${x}px`;
+        article.style.top = `${y}px`;
+      };
+      const finish = (finishEvent: PointerEvent): void => {
+        if (finishEvent.pointerId !== event.pointerId) return;
+        article.removeEventListener('pointermove', move);
+        article.removeEventListener('pointerup', finish);
+        article.removeEventListener('pointercancel', cancel);
+        article.classList.remove('story-map-node-dragging');
+        if (article.hasPointerCapture(event.pointerId))
+          article.releasePointerCapture(event.pointerId);
+        this.guard(() => {
+          this.setNodePosition(node.id, { x, y });
+          this.refresh();
+          this.setStatus(`${node.id} position saved in editor metadata.`);
+        });
+      };
+      const cancel = (cancelEvent: PointerEvent): void => {
+        if (cancelEvent.pointerId !== event.pointerId) return;
+        article.removeEventListener('pointermove', move);
+        article.removeEventListener('pointerup', finish);
+        article.removeEventListener('pointercancel', cancel);
+        article.classList.remove('story-map-node-dragging');
+        this.render();
+      };
+      article.addEventListener('pointermove', move);
+      article.addEventListener('pointerup', finish);
+      article.addEventListener('pointercancel', cancel);
+    });
+  }
+
   private renderNode(node: PositionedNode): HTMLElement {
     const article = element('article', 'story-map-node');
     article.style.left = `${node.x}px`;
@@ -350,6 +472,7 @@ export class StoryMapEditor {
     const open = textButton('Open', 'map-button map-button-primary');
     open.addEventListener('click', () => this.host.openScene(node.record.file.path, node.id));
     header.append(identity, open);
+    this.attachNodeDragging(article, header, node);
     article.append(header);
 
     const outgoing = this.edges.filter((edge) => edge.sourceId === node.id);
@@ -360,9 +483,17 @@ export class StoryMapEditor {
     const actions = element('div', 'story-map-node-actions');
     const connect = textButton('+ Connection');
     connect.addEventListener('click', () => this.openConnectionDialog(node));
+    const position = textButton('Position');
+    position.addEventListener('click', () => this.openPositionDialog(node));
     const rename = textButton('Rename');
     rename.addEventListener('click', () => this.openRenameDialog(node.id));
-    actions.append(connect, rename);
+    const duplicate = textButton('Duplicate');
+    duplicate.addEventListener('click', () => this.openDuplicateDialog(node));
+    const remove = textButton('Delete', 'map-button map-button-danger');
+    remove.disabled = this.nodes.length <= 1;
+    remove.title = remove.disabled ? 'A story must keep at least one scene.' : '';
+    remove.addEventListener('click', () => this.openDeleteDialog(node.id));
+    actions.append(connect, position, rename, duplicate, remove);
     article.append(actions);
 
     const edgeList = element('div', 'story-map-edge-list');
@@ -403,10 +534,10 @@ export class StoryMapEditor {
     );
     const remove = textButton('×', 'map-edge-remove');
     remove.setAttribute('aria-label', `Remove ${edge.label} connection`);
-    remove.disabled = edge.nested;
-    if (edge.nested) remove.title = 'Open the scene to remove a connection inside a branch.';
+    remove.disabled = !edge.removable;
+    if (!edge.removable) remove.title = edge.removeReason ?? 'This connection cannot be removed.';
     remove.addEventListener('click', () => {
-      if (edge.nested || !window.confirm(`Remove the ${edge.label} connection?`)) return;
+      if (!edge.removable || !window.confirm(`Remove the ${edge.label} connection?`)) return;
       this.guard(() => this.removeEdge(edge));
     });
     row.append(description, target, remove);
@@ -439,6 +570,184 @@ export class StoryMapEditor {
     this.refresh();
     this.host.preview();
     this.setStatus(`${edge.label} connection removed from ${edge.sourceId}.`);
+  }
+
+  private openPositionDialog(node: PositionedNode): void {
+    const current = this.positions.get(node.id) ?? node;
+    const dialog = element('dialog', 'new-scene-dialog');
+    const form = element('form', 'new-scene-form');
+    const title = element('h2');
+    title.textContent = `Position ${node.id}`;
+    const copy = element('p', 'scene-dialog-copy');
+    copy.textContent =
+      'Coordinates are editor-only metadata. They never affect or ship inside the game.';
+    const x = input(String(Math.round(current.x)));
+    const y = input(String(Math.round(current.y)));
+    for (const control of [x, y]) {
+      control.type = 'number';
+      control.min = '0';
+      control.max = '1000000';
+      control.step = '1';
+    }
+    const coordinates = element('div', 'scene-field-row');
+    coordinates.append(field('Horizontal position', x), field('Vertical position', y));
+    const actions = element('div', 'new-scene-actions');
+    const automatic = textButton('Use automatic position', 'button button-subtle');
+    const cancel = textButton('Cancel', 'button button-subtle');
+    const save = element('button', 'button button-primary');
+    save.type = 'submit';
+    save.textContent = 'Save position';
+    actions.append(automatic, cancel, save);
+    form.append(title, copy, coordinates, actions);
+    dialog.append(form);
+    document.body.append(dialog);
+    cancel.addEventListener('click', () => dialog.close());
+    automatic.addEventListener('click', () =>
+      this.guard(() => {
+        this.setNodePosition(node.id, null);
+        dialog.close();
+        this.refresh();
+        this.setStatus(`${node.id} returned to automatic layout.`);
+      }),
+    );
+    dialog.addEventListener('close', () => dialog.remove());
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.guard(() => {
+        const nextX = Number(x.value);
+        const nextY = Number(y.value);
+        if (
+          !Number.isFinite(nextX) ||
+          !Number.isFinite(nextY) ||
+          nextX < 0 ||
+          nextY < 0 ||
+          nextX > 1_000_000 ||
+          nextY > 1_000_000
+        ) {
+          throw new StorySourceEditError('Map coordinates must be between 0 and 1,000,000.');
+        }
+        this.setNodePosition(node.id, { x: Math.round(nextX), y: Math.round(nextY) });
+        dialog.close();
+        this.refresh();
+        this.setStatus(`${node.id} position saved in editor metadata.`);
+      });
+    });
+    dialog.showModal();
+    x.focus();
+    x.select();
+  }
+
+  private duplicateIdSuggestion(currentId: string): string {
+    const ids = new Set(this.nodes.map((node) => node.id));
+    for (let index = 1; ; index += 1) {
+      const suffix = index === 1 ? '.copy' : `.copy-${index}`;
+      const base = currentId.slice(0, 128 - suffix.length).replace(/[._-]+$/u, '') || 'scene';
+      const candidate = `${base}${suffix}`;
+      if (!ids.has(candidate)) return candidate;
+    }
+  }
+
+  private openDuplicateDialog(node: StoryMapNode): void {
+    const dialog = element('dialog', 'new-scene-dialog');
+    const form = element('form', 'new-scene-form');
+    const title = element('h2');
+    title.textContent = 'Duplicate scene';
+    const copy = element('p', 'scene-dialog-copy');
+    copy.textContent =
+      'The copy receives unique content IDs. Other scenes continue pointing to the original.';
+    const sceneId = input(this.duplicateIdSuggestion(node.id));
+    const path = element('select');
+    for (const record of this.records) {
+      const option = element('option');
+      option.value = record.file.path;
+      option.textContent = record.file.path;
+      option.selected = record.file.path === node.record.file.path;
+      path.append(option);
+    }
+    const retarget = element('input');
+    retarget.type = 'checkbox';
+    retarget.checked = true;
+    const retargetLabel = element('label', 'scene-dialog-checkbox');
+    const retargetCopy = element('span');
+    retargetCopy.textContent = 'Make links back to this scene point to the duplicate';
+    retargetLabel.append(retarget, retargetCopy);
+    const actions = element('div', 'new-scene-actions');
+    const cancel = textButton('Cancel', 'button button-subtle');
+    const duplicate = element('button', 'button button-primary');
+    duplicate.type = 'submit';
+    duplicate.textContent = 'Duplicate scene';
+    actions.append(cancel, duplicate);
+    form.append(
+      title,
+      copy,
+      field('New scene ID', sceneId),
+      field('Story file', path),
+      retargetLabel,
+      actions,
+    );
+    dialog.append(form);
+    document.body.append(dialog);
+    cancel.addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove());
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.guard(() => {
+        const next = sceneId.value.trim();
+        const warning = this.host.duplicateScene(node.id, next, path.value, retarget.checked);
+        dialog.close();
+        this.refresh();
+        this.host.preview();
+        this.setStatus(`Scene ${node.id} duplicated as ${next}.${warning}`);
+      });
+    });
+    dialog.showModal();
+    sceneId.focus();
+    sceneId.select();
+  }
+
+  private openDeleteDialog(sceneId: string): void {
+    const replacements = this.nodes.filter((node) => node.id !== sceneId);
+    if (replacements.length === 0) return;
+    const dialog = element('dialog', 'new-scene-dialog');
+    const form = element('form', 'new-scene-form');
+    const title = element('h2');
+    title.textContent = 'Delete scene';
+    const copy = element('p', 'scene-dialog-copy scene-dialog-warning');
+    copy.textContent =
+      'Every incoming choice, jump, call, and project entry reference will redirect before this scene is removed.';
+    const replacement = element('select');
+    for (const node of replacements) {
+      const option = element('option');
+      option.value = node.id;
+      option.textContent = `${node.id} · ${node.record.file.path}`;
+      replacement.append(option);
+    }
+    const actions = element('div', 'new-scene-actions');
+    const cancel = textButton('Cancel', 'button button-subtle');
+    const remove = element('button', 'button scene-dialog-danger');
+    remove.type = 'submit';
+    remove.textContent = 'Delete and redirect';
+    actions.append(cancel, remove);
+    form.append(title, copy, field('Redirect references to', replacement), actions);
+    dialog.append(form);
+    document.body.append(dialog);
+    cancel.addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove());
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.guard(() => {
+        const destination = replacement.value;
+        const warning = this.host.deleteScene(sceneId, destination);
+        dialog.close();
+        this.refresh();
+        this.host.preview();
+        this.setStatus(
+          `Scene ${sceneId} deleted; references now lead to ${destination}.${warning}`,
+        );
+      });
+    });
+    dialog.showModal();
+    replacement.focus();
   }
 
   private openConnectionDialog(node: StoryMapNode): void {
@@ -548,11 +857,11 @@ export class StoryMapEditor {
       event.preventDefault();
       this.guard(() => {
         const next = sceneId.value.trim();
-        this.host.renameScene(currentId, next);
+        const warning = this.host.renameScene(currentId, next);
         dialog.close();
         this.refresh();
         this.host.preview();
-        this.setStatus(`Scene ${currentId} renamed to ${next}.`);
+        this.setStatus(`Scene ${currentId} renamed to ${next}.${warning}`);
       });
     });
     dialog.showModal();

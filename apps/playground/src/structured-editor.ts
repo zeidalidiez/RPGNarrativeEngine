@@ -20,7 +20,14 @@ export interface StructuredEditorFile {
 export interface StructuredEditorHost {
   readonly files: () => readonly StructuredEditorFile[];
   readonly updateFile: (path: string, source: string) => void;
-  readonly renameScene: (from: string, to: string) => void;
+  readonly deleteScene: (sceneId: string, replacementId: string) => string;
+  readonly duplicateScene: (
+    from: string,
+    to: string,
+    targetPath: string,
+    retargetSelfReferences: boolean,
+  ) => string;
+  readonly renameScene: (from: string, to: string) => string;
   readonly selectFile: (path: string) => void;
   readonly openAdvancedSource: (path: string, from?: number, to?: number) => void;
   readonly preview: () => void;
@@ -83,6 +90,13 @@ interface ConditionControl {
   readonly element: HTMLElement;
   readonly value: () => string;
 }
+
+interface ConditionLeafControl {
+  readonly element: HTMLElement;
+  readonly state: () => ConditionState;
+}
+
+type ConditionMode = 'all' | 'any' | 'single';
 
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -243,13 +257,51 @@ const CONDITION_OPTIONS: readonly { readonly value: ConditionRule; readonly labe
   { value: 'advanced', label: 'Advanced expression' },
 ];
 
-function conditionControl(
-  source: string,
-  expression: ExpressionAst | null,
-  allowAlways: boolean,
-): ConditionControl {
-  const initial = conditionState(source, expression, allowAlways);
-  const wrapper = element('div', 'condition-builder');
+function conditionStateValue(state: ConditionState, allowAlways: boolean): string {
+  const selected = state.rule;
+  if (selected === 'always') return allowAlways ? '' : 'true';
+  if (selected === 'advanced') {
+    const advanced = state.value.trim();
+    if (advanced.length === 0 || /[\r\n]/u.test(advanced)) {
+      throw new StorySourceEditError('An advanced rule must be one nonempty line.');
+    }
+    return advanced;
+  }
+  const left = variablePath(state.variable);
+  if (selected === 'truthy') return left;
+  if (selected === 'falsy') return `!${left}`;
+  if (selected.endsWith('-true') || selected.endsWith('-false')) {
+    const operator = selected.startsWith('neq-') ? '!=' : '==';
+    return `${left} ${operator} ${selected.endsWith('-true') ? 'true' : 'false'}`;
+  }
+  if (selected.endsWith('-text')) {
+    const operator = selected.startsWith('neq-') ? '!=' : '==';
+    return `${left} ${operator} ${JSON.stringify(state.value)}`;
+  }
+  if (selected.endsWith('-variable')) {
+    const operator = selected.startsWith('neq-') ? '!=' : '==';
+    return `${left} ${operator} ${variablePath(state.value, 'Comparison variable')}`;
+  }
+  const number = state.value.trim();
+  if (!/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/u.test(number)) {
+    throw new StorySourceEditError('The comparison value must be a valid number.');
+  }
+  const operator = selected.startsWith('neq-')
+    ? '!='
+    : selected.startsWith('lt-')
+      ? '<'
+      : selected.startsWith('lte-')
+        ? '<='
+        : selected.startsWith('gt-')
+          ? '>'
+          : selected.startsWith('gte-')
+            ? '>='
+            : '==';
+  return `${left} ${operator} ${number}`;
+}
+
+function conditionLeafControl(initial: ConditionState, allowAlways: boolean): ConditionLeafControl {
+  const wrapper = element('div', 'condition-leaf-builder');
   const rule = element('select');
   for (const descriptor of CONDITION_OPTIONS) {
     if (!allowAlways && descriptor.value === 'always') continue;
@@ -288,47 +340,134 @@ function conditionControl(
 
   return {
     element: wrapper,
+    state() {
+      return {
+        rule: rule.value as ConditionRule,
+        variable: variable.value,
+        value: value.value,
+      };
+    },
+  };
+}
+
+function flattenLogicalExpression(
+  expression: ExpressionAst,
+  operator: '&&' | '||',
+): readonly ExpressionAst[] {
+  if (expression.kind === 'binary' && expression.operator === operator) {
+    return [
+      ...flattenLogicalExpression(expression.left, operator),
+      ...flattenLogicalExpression(expression.right, operator),
+    ];
+  }
+  return [expression];
+}
+
+function groupedConditionState(
+  source: string,
+  expression: ExpressionAst | null,
+  allowAlways: boolean,
+): { readonly mode: ConditionMode; readonly states: readonly ConditionState[] } {
+  if (expression === null) {
+    return { mode: 'single', states: [conditionState(source, null, allowAlways)] };
+  }
+  const current = expression.kind === 'group' ? expression.expression : expression;
+  if (current.kind === 'binary' && (current.operator === '&&' || current.operator === '||')) {
+    return {
+      mode: current.operator === '&&' ? 'all' : 'any',
+      states: flattenLogicalExpression(current, current.operator).map((part) =>
+        conditionState(source, part, false),
+      ),
+    };
+  }
+  return { mode: 'single', states: [conditionState(source, expression, allowAlways)] };
+}
+
+function defaultGroupedCondition(): ConditionState {
+  return { rule: 'truthy', variable: 'state.flag', value: '' };
+}
+
+function conditionControl(
+  source: string,
+  expression: ExpressionAst | null,
+  allowAlways: boolean,
+): ConditionControl {
+  const initial = groupedConditionState(source, expression, allowAlways);
+  const wrapper = element('div', 'condition-builder');
+  const mode = element('select');
+  for (const descriptor of [
+    { value: 'single', label: 'One rule' },
+    { value: 'all', label: 'All rules must match' },
+    { value: 'any', label: 'Any rule may match' },
+  ] as const) {
+    const option = element('option');
+    option.value = descriptor.value;
+    option.textContent = descriptor.label;
+    option.selected = descriptor.value === initial.mode;
+    mode.append(option);
+  }
+  const rows = element('div', 'condition-rule-list');
+  const add = textButton('+ Add rule', 'condition-add-rule');
+  const help = element('p', 'scene-card-note condition-group-note');
+  help.textContent = 'Grouped rules are saved as one portable story expression.';
+  let controls: ConditionLeafControl[] = [];
+  let currentMode = initial.mode;
+
+  const states = (): ConditionState[] => controls.map((control) => control.state());
+  const renderRows = (nextStates: readonly ConditionState[]): void => {
+    rows.replaceChildren();
+    controls = nextStates.map((state, index) => {
+      const control = conditionLeafControl(state, allowAlways && currentMode === 'single');
+      const row = element('div', 'condition-rule-row');
+      const remove = textButton('Remove rule', 'condition-remove-rule');
+      remove.disabled = currentMode === 'single' || nextStates.length <= 2;
+      remove.addEventListener('click', () => {
+        const remaining = states().filter((_, candidate) => candidate !== index);
+        renderRows(remaining);
+      });
+      row.append(control.element, remove);
+      rows.append(row);
+      return control;
+    });
+    add.hidden = currentMode === 'single';
+    help.hidden = currentMode === 'single';
+  };
+
+  mode.addEventListener('change', () => {
+    const nextMode = mode.value as ConditionMode;
+    let nextStates = states();
+    if (
+      nextMode === 'single' &&
+      nextStates.length > 1 &&
+      !window.confirm('Keep only the first condition rule?')
+    ) {
+      mode.value = currentMode;
+      return;
+    }
+    if (nextMode === 'single') nextStates = [nextStates[0] ?? defaultGroupedCondition()];
+    else if (currentMode === 'single') {
+      const first = nextStates[0];
+      nextStates = [
+        first === undefined || first.rule === 'always' ? defaultGroupedCondition() : first,
+        defaultGroupedCondition(),
+      ];
+    }
+    currentMode = nextMode;
+    renderRows(nextStates);
+  });
+  add.addEventListener('click', () => renderRows([...states(), defaultGroupedCondition()]));
+  wrapper.append(field('Match', mode), rows, add, help);
+  renderRows(initial.states);
+
+  return {
+    element: wrapper,
     value() {
-      const selected = rule.value as ConditionRule;
-      if (selected === 'always') return allowAlways ? '' : 'true';
-      if (selected === 'advanced') {
-        const advanced = value.value.trim();
-        if (advanced.length === 0 || /[\r\n]/u.test(advanced)) {
-          throw new StorySourceEditError('An advanced rule must be one nonempty line.');
-        }
-        return advanced;
-      }
-      const left = variablePath(variable.value);
-      if (selected === 'truthy') return left;
-      if (selected === 'falsy') return `!${left}`;
-      if (selected.endsWith('-true') || selected.endsWith('-false')) {
-        const operator = selected.startsWith('neq-') ? '!=' : '==';
-        return `${left} ${operator} ${selected.endsWith('-true') ? 'true' : 'false'}`;
-      }
-      if (selected.endsWith('-text')) {
-        const operator = selected.startsWith('neq-') ? '!=' : '==';
-        return `${left} ${operator} ${JSON.stringify(value.value)}`;
-      }
-      if (selected.endsWith('-variable')) {
-        const operator = selected.startsWith('neq-') ? '!=' : '==';
-        return `${left} ${operator} ${variablePath(value.value, 'Comparison variable')}`;
-      }
-      const number = value.value.trim();
-      if (!/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/u.test(number)) {
-        throw new StorySourceEditError('The comparison value must be a valid number.');
-      }
-      const operator = selected.startsWith('neq-')
-        ? '!='
-        : selected.startsWith('lt-')
-          ? '<'
-          : selected.startsWith('lte-')
-            ? '<='
-            : selected.startsWith('gt-')
-              ? '>'
-              : selected.startsWith('gte-')
-                ? '>='
-                : '==';
-      return `${left} ${operator} ${number}`;
+      const values = states().map((state) =>
+        conditionStateValue(state, allowAlways && currentMode === 'single'),
+      );
+      if (currentMode === 'single') return values[0] ?? '';
+      const operator = currentMode === 'all' ? '&&' : '||';
+      return values.map((value) => `(${value})`).join(` ${operator} `);
     },
   };
 }
@@ -610,6 +749,20 @@ export class StructuredSceneEditor {
     renameButton.addEventListener('click', () =>
       this.openRenameSceneDialog(String(selected.scene.id)),
     );
+    const duplicateButton = textButton(
+      'Duplicate scene',
+      'button button-subtle scene-source-button',
+    );
+    duplicateButton.addEventListener('click', () => this.openDuplicateSceneDialog(selected));
+    const deleteButton = textButton(
+      'Delete scene',
+      'button button-subtle scene-source-button scene-delete-button',
+    );
+    deleteButton.disabled = this.allScenes().length <= 1;
+    deleteButton.title = deleteButton.disabled ? 'A story must keep at least one scene.' : '';
+    deleteButton.addEventListener('click', () =>
+      this.openDeleteSceneDialog(String(selected.scene.id)),
+    );
     const sourceButton = textButton('Advanced source', 'button button-subtle scene-source-button');
     sourceButton.addEventListener('click', () =>
       this.host.openAdvancedSource(
@@ -618,7 +771,7 @@ export class StructuredSceneEditor {
         selected.scene.span.end.offset,
       ),
     );
-    headerActions.append(renameButton, sourceButton);
+    headerActions.append(renameButton, duplicateButton, deleteButton, sourceButton);
     header.append(identity, headerActions);
     this.elements.canvas.append(header);
 
@@ -1194,16 +1347,139 @@ export class StructuredSceneEditor {
       event.preventDefault();
       this.guardEdit(() => {
         const nextId = sceneId.value.trim();
-        this.host.renameScene(currentId, nextId);
+        const warning = this.host.renameScene(currentId, nextId);
         dialog.close();
         this.selection = { path: this.selection?.path ?? '', sceneId: nextId };
         this.refresh(this.selection);
         this.host.preview();
-        this.setStatus(`Scene ${currentId} renamed to ${nextId}.`);
+        this.setStatus(`Scene ${currentId} renamed to ${nextId}.${warning}`);
       });
     });
     dialog.showModal();
     sceneId.focus();
     sceneId.select();
+  }
+
+  private duplicateIdSuggestion(currentId: string): string {
+    const ids = new Set(this.allScenes().map(({ scene }) => String(scene.id)));
+    for (let index = 1; ; index += 1) {
+      const suffix = index === 1 ? '.copy' : `.copy-${index}`;
+      const base = currentId.slice(0, 128 - suffix.length).replace(/[._-]+$/u, '') || 'scene';
+      const candidate = `${base}${suffix}`;
+      if (!ids.has(candidate)) return candidate;
+    }
+  }
+
+  private openDuplicateSceneDialog(selected: {
+    readonly record: ParsedStoryFile;
+    readonly scene: StorySceneAst;
+  }): void {
+    const currentId = String(selected.scene.id);
+    const dialog = element('dialog', 'new-scene-dialog');
+    const form = element('form', 'new-scene-form');
+    const title = element('h2');
+    title.textContent = 'Duplicate scene';
+    const explanation = element('p', 'scene-dialog-copy');
+    explanation.textContent =
+      'The copied scene receives unique content IDs. Other scenes continue pointing to the original.';
+    const sceneId = input(this.duplicateIdSuggestion(currentId));
+    sceneId.autocomplete = 'off';
+    const path = element('select');
+    for (const record of this.parsedFiles) {
+      const option = element('option');
+      option.value = record.file.path;
+      option.textContent = record.file.path;
+      option.selected = record.file.path === selected.record.file.path;
+      path.append(option);
+    }
+    const retarget = element('input');
+    retarget.type = 'checkbox';
+    retarget.checked = true;
+    const retargetLabel = element('label', 'scene-dialog-checkbox');
+    const retargetCopy = element('span');
+    retargetCopy.textContent = 'Make links back to this scene point to the duplicate';
+    retargetLabel.append(retarget, retargetCopy);
+    const actions = element('div', 'new-scene-actions');
+    const cancel = textButton('Cancel', 'button button-subtle');
+    const duplicate = element('button', 'button button-primary');
+    duplicate.type = 'submit';
+    duplicate.textContent = 'Duplicate scene';
+    actions.append(cancel, duplicate);
+    form.append(
+      title,
+      explanation,
+      field('New scene ID', sceneId),
+      field('Story file', path),
+      retargetLabel,
+      actions,
+    );
+    dialog.append(form);
+    document.body.append(dialog);
+    cancel.addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove());
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.guardEdit(() => {
+        const nextId = sceneId.value.trim();
+        const warning = this.host.duplicateScene(currentId, nextId, path.value, retarget.checked);
+        dialog.close();
+        this.selection = { path: path.value, sceneId: nextId };
+        this.refresh(this.selection);
+        this.host.selectFile(path.value);
+        this.host.preview();
+        this.setStatus(`Scene ${currentId} duplicated as ${nextId}.${warning}`);
+      });
+    });
+    dialog.showModal();
+    sceneId.focus();
+    sceneId.select();
+  }
+
+  private openDeleteSceneDialog(currentId: string): void {
+    const replacements = this.allScenes().filter(({ scene }) => String(scene.id) !== currentId);
+    if (replacements.length === 0) return;
+    const dialog = element('dialog', 'new-scene-dialog');
+    const form = element('form', 'new-scene-form');
+    const title = element('h2');
+    title.textContent = 'Delete scene';
+    const explanation = element('p', 'scene-dialog-copy scene-dialog-warning');
+    explanation.textContent =
+      'The scene will be removed. Every incoming choice, jump, call, and project entry reference will redirect to the selected scene.';
+    const replacement = element('select');
+    for (const candidate of replacements) {
+      const option = element('option');
+      option.value = String(candidate.scene.id);
+      option.textContent = `${String(candidate.scene.id)} · ${candidate.record.file.path}`;
+      replacement.append(option);
+    }
+    const actions = element('div', 'new-scene-actions');
+    const cancel = textButton('Cancel', 'button button-subtle');
+    const remove = element('button', 'button scene-dialog-danger');
+    remove.type = 'submit';
+    remove.textContent = 'Delete and redirect';
+    actions.append(cancel, remove);
+    form.append(title, explanation, field('Redirect references to', replacement), actions);
+    dialog.append(form);
+    document.body.append(dialog);
+    cancel.addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove());
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.guardEdit(() => {
+        const replacementId = replacement.value;
+        const target = replacements.find(({ scene }) => String(scene.id) === replacementId)!;
+        const warning = this.host.deleteScene(currentId, replacementId);
+        dialog.close();
+        this.selection = { path: target.record.file.path, sceneId: replacementId };
+        this.refresh(this.selection);
+        this.host.selectFile(target.record.file.path);
+        this.host.preview();
+        this.setStatus(
+          `Scene ${currentId} deleted; references now lead to ${replacementId}.${warning}`,
+        );
+      });
+    });
+    dialog.showModal();
+    replacement.focus();
   }
 }
