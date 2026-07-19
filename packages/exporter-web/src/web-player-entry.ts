@@ -1,5 +1,5 @@
 import type { CompiledGame } from '@rpgnarrativeengine/ir';
-import { mountNarrativePlayer } from '@rpgnarrativeengine/player';
+import { mountNarrativePlayer, type NarrativePlayerSaveOptions } from '@rpgnarrativeengine/player';
 
 function playerRoot(): HTMLElement {
   const root = document.querySelector<HTMLElement>('#player');
@@ -42,7 +42,26 @@ function showLoadFailure(root: HTMLElement, error: unknown): void {
   root.replaceChildren(message);
 }
 
+function saveOptions(root: HTMLElement): NarrativePlayerSaveOptions | undefined {
+  if (root.dataset['saves'] !== 'true') return undefined;
+  const projectId = root.dataset['projectId'];
+  const buildIdentity = root.dataset['gameBundleHash'];
+  if (projectId === undefined || buildIdentity === undefined) return undefined;
+  try {
+    return {
+      buildIdentity,
+      key: `rpgnarrativeengine.save.${projectId}`,
+      storage: globalThis.localStorage,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 const root = playerRoot();
 void loadGame(root)
-  .then((game) => mountNarrativePlayer(root, game))
+  .then((game) => {
+    const save = saveOptions(root);
+    return mountNarrativePlayer(root, game, save === undefined ? {} : { save });
+  })
   .catch((error: unknown) => showLoadFailure(root, error));

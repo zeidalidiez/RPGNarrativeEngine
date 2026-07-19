@@ -94,6 +94,43 @@ button { -webkit-tap-highlight-color: transparent; }
 .nre-player,
 .nre-stage { min-height: inherit; }
 
+.nre-player { position: relative; }
+
+.nre-save-tools {
+  display: flex;
+  position: absolute;
+  z-index: 1;
+  top: 1rem;
+  right: 1rem;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.nre-save,
+.nre-load {
+  padding: 0.42rem 0.72rem;
+  font-size: 0.69rem;
+  font-weight: 750;
+}
+
+.nre-button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.nre-save-status {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  width: max-content;
+  max-width: min(22rem, 70vw);
+  margin: 0;
+  color: #aebdc0;
+  font-size: 0.69rem;
+  text-align: right;
+}
+
 .nre-stage {
   display: flex;
   position: relative;

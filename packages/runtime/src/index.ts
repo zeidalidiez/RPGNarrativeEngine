@@ -49,20 +49,73 @@ export interface RuntimeEndingView {
 
 export type RuntimeView = RuntimeChoiceView | RuntimeEndingView | RuntimeTextView;
 
+export type RuntimeInstructionBlockStep =
+  | {
+      readonly kind: 'branch';
+      readonly instructionIndex: number;
+      readonly arm: 'otherwise' | 'then';
+    }
+  | {
+      readonly kind: 'choice';
+      readonly instructionIndex: number;
+      readonly optionId: string;
+    };
+
+export interface RuntimeInstructionBlockReference {
+  readonly sceneId: string;
+  readonly path: readonly RuntimeInstructionBlockStep[];
+}
+
+export interface RuntimeFrameSave {
+  readonly block: RuntimeInstructionBlockReference;
+  readonly index: number;
+}
+
+export interface RuntimeCallSave {
+  readonly sceneId: string;
+  readonly frames: readonly RuntimeFrameSave[];
+}
+
+/** Versioned, host-neutral state captured only while the runtime is suspended at a player view. */
+export interface NarrativeSave {
+  readonly format: 'rpg-narrative-engine-save';
+  readonly formatVersion: 1;
+  readonly game: {
+    readonly buildIdentity: string;
+    readonly formatVersion: 1;
+  };
+  readonly state: {
+    readonly sceneId: string;
+    readonly variables: Readonly<Record<string, NarrativeValue>>;
+    readonly frames: readonly RuntimeFrameSave[];
+    readonly calls: readonly RuntimeCallSave[];
+    readonly view: RuntimeView;
+    readonly pendingChoiceIds: readonly string[];
+  };
+}
+
 export interface RuntimeOptions {
   readonly initialVariables?: Readonly<Record<string, NarrativeValue>>;
   readonly onEffect?: (effect: EffectInstruction) => void;
   readonly stepBudget?: number;
+  /** Exact canonical game-bundle hash used to reject saves from another build. */
+  readonly buildIdentity?: string;
 }
 
 interface Frame {
   readonly instructions: readonly CompiledInstruction[];
+  readonly block: RuntimeInstructionBlockReference;
   index: number;
 }
 
 interface CallContinuation {
   readonly sceneId: string;
   readonly frames: Frame[];
+}
+
+interface PendingChoiceContext {
+  readonly block: RuntimeInstructionBlockReference;
+  readonly instructionIndex: number;
 }
 
 export class NarrativeRuntimeError extends Error {
@@ -140,6 +193,266 @@ function plainText(nodes: readonly ResolvedInline[]): string {
   return value;
 }
 
+const BUILD_IDENTITY_PATTERN = /^[a-f0-9]{64}$/u;
+const VARIABLE_PATH_PATTERN = /^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*$/u;
+const MAX_SAVE_JSON_LENGTH = 8 * 1024 * 1024;
+const MAX_SAVE_COLLECTION_LENGTH = 10_000;
+const MAX_SAVE_STACK_DEPTH = 256;
+const MAX_SAVE_STRING_LENGTH = 1_000_000;
+const MAX_INLINE_DEPTH = 64;
+
+function invalidSave(message: string): never {
+  throw new NarrativeRuntimeError(`Invalid save: ${message}`);
+}
+
+function saveRecord(value: unknown, context: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return invalidSave(`${context} must be an object.`);
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function saveArray(value: unknown, context: string, maximum: number): readonly unknown[] {
+  if (!Array.isArray(value)) return invalidSave(`${context} must be an array.`);
+  if (value.length > maximum) return invalidSave(`${context} is too large.`);
+  return value;
+}
+
+function saveString(value: unknown, context: string, allowEmpty = false): string {
+  if (typeof value !== 'string' || (!allowEmpty && value.length === 0)) {
+    return invalidSave(`${context} must be ${allowEmpty ? 'a string' : 'a nonempty string'}.`);
+  }
+  if (value.length > MAX_SAVE_STRING_LENGTH) return invalidSave(`${context} is too long.`);
+  return value;
+}
+
+function nullableSaveString(value: unknown, context: string): string | null {
+  return value === null ? null : saveString(value, context, true);
+}
+
+function saveInteger(value: unknown, context: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    return invalidSave(`${context} must be a nonnegative safe integer.`);
+  }
+  return value;
+}
+
+function saveNarrativeValue(value: unknown, context: string): NarrativeValue {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return invalidSave(`${context} must be finite.`);
+    return value;
+  }
+  return saveString(value, context, true);
+}
+
+function parseSaveVariables(value: unknown): Readonly<Record<string, NarrativeValue>> {
+  const record = saveRecord(value, 'state.variables');
+  const keys = Object.keys(record);
+  if (keys.length > MAX_SAVE_COLLECTION_LENGTH) return invalidSave('state.variables is too large.');
+  const variables = Object.create(null) as Record<string, NarrativeValue>;
+  for (const key of keys) {
+    if (!VARIABLE_PATH_PATTERN.test(key)) {
+      return invalidSave(`state variable ${JSON.stringify(key)} is not a valid variable path.`);
+    }
+    variables[key] = saveNarrativeValue(record[key], `state.variables.${key}`);
+  }
+  return Object.freeze(variables);
+}
+
+function parseBlockStep(value: unknown, context: string): RuntimeInstructionBlockStep {
+  const record = saveRecord(value, context);
+  const kind = record['kind'];
+  const instructionIndex = saveInteger(record['instructionIndex'], `${context}.instructionIndex`);
+  if (kind === 'branch') {
+    const arm = record['arm'];
+    if (arm !== 'then' && arm !== 'otherwise') {
+      return invalidSave(`${context}.arm must be "then" or "otherwise".`);
+    }
+    return Object.freeze({ kind, instructionIndex, arm });
+  }
+  if (kind === 'choice') {
+    return Object.freeze({
+      kind,
+      instructionIndex,
+      optionId: saveString(record['optionId'], `${context}.optionId`),
+    });
+  }
+  return invalidSave(`${context}.kind is unsupported.`);
+}
+
+function parseBlockReference(value: unknown, context: string): RuntimeInstructionBlockReference {
+  const record = saveRecord(value, context);
+  const path = saveArray(record['path'], `${context}.path`, MAX_SAVE_STACK_DEPTH).map(
+    (step, index) => parseBlockStep(step, `${context}.path[${index}]`),
+  );
+  return Object.freeze({
+    sceneId: saveString(record['sceneId'], `${context}.sceneId`),
+    path: Object.freeze(path),
+  });
+}
+
+function parseFrameSave(value: unknown, context: string): RuntimeFrameSave {
+  const record = saveRecord(value, context);
+  return Object.freeze({
+    block: parseBlockReference(record['block'], `${context}.block`),
+    index: saveInteger(record['index'], `${context}.index`),
+  });
+}
+
+function parseFrameSaves(value: unknown, context: string): readonly RuntimeFrameSave[] {
+  return Object.freeze(
+    saveArray(value, context, MAX_SAVE_STACK_DEPTH).map((frame, index) =>
+      parseFrameSave(frame, `${context}[${index}]`),
+    ),
+  );
+}
+
+function parseResolvedInline(value: unknown, context: string, depth: number): ResolvedInline {
+  if (depth > MAX_INLINE_DEPTH) return invalidSave(`${context} is nested too deeply.`);
+  const record = saveRecord(value, context);
+  const kind = record['kind'];
+  if (kind === 'text') {
+    return Object.freeze({ kind, value: saveString(record['value'], `${context}.value`, true) });
+  }
+  if (kind === 'line-break') return Object.freeze({ kind });
+  const children = Object.freeze(
+    saveArray(record['children'], `${context}.children`, MAX_SAVE_COLLECTION_LENGTH).map(
+      (child, index) => parseResolvedInline(child, `${context}.children[${index}]`, depth + 1),
+    ),
+  );
+  if (kind === 'emphasis' || kind === 'strong') return Object.freeze({ kind, children });
+  if (kind === 'language') {
+    return Object.freeze({
+      kind,
+      languageTag: saveString(record['languageTag'], `${context}.languageTag`),
+      children,
+    });
+  }
+  if (kind === 'pronunciation') {
+    return Object.freeze({
+      kind,
+      hint: saveString(record['hint'], `${context}.hint`),
+      children,
+    });
+  }
+  return invalidSave(`${context}.kind is unsupported.`);
+}
+
+function parseSaveView(value: unknown): RuntimeView {
+  const record = saveRecord(value, 'state.view');
+  const kind = record['kind'];
+  const sceneId = saveString(record['sceneId'], 'state.view.sceneId');
+  if (kind === 'text') {
+    const speakerValue = record['speaker'];
+    let speaker: CompiledSpeaker | null = null;
+    if (speakerValue !== null) {
+      const speakerRecord = saveRecord(speakerValue, 'state.view.speaker');
+      speaker = Object.freeze({
+        reference: saveString(speakerRecord['reference'], 'state.view.speaker.reference'),
+        variant: nullableSaveString(speakerRecord['variant'], 'state.view.speaker.variant'),
+      });
+    }
+    const content = Object.freeze(
+      saveArray(record['content'], 'state.view.content', MAX_SAVE_COLLECTION_LENGTH).map(
+        (node, index) => parseResolvedInline(node, `state.view.content[${index}]`, 0),
+      ),
+    );
+    const expectedPlainText = plainText(content);
+    const savedPlainText = saveString(record['plainText'], 'state.view.plainText', true);
+    if (savedPlainText !== expectedPlainText) {
+      return invalidSave('state.view.plainText does not match its resolved content.');
+    }
+    return Object.freeze({
+      kind,
+      sceneId,
+      speaker,
+      contentId: nullableSaveString(record['contentId'], 'state.view.contentId'),
+      content,
+      plainText: savedPlainText,
+    });
+  }
+  if (kind === 'choice') {
+    const seen = new Set<string>();
+    const options = Object.freeze(
+      saveArray(record['options'], 'state.view.options', MAX_SAVE_COLLECTION_LENGTH).map(
+        (option, index) => {
+          const optionRecord = saveRecord(option, `state.view.options[${index}]`);
+          const id = saveString(optionRecord['id'], `state.view.options[${index}].id`);
+          if (seen.has(id)) return invalidSave(`state.view contains duplicate choice ${id}.`);
+          seen.add(id);
+          return Object.freeze({
+            id,
+            label: saveString(optionRecord['label'], `state.view.options[${index}].label`, true),
+          });
+        },
+      ),
+    );
+    return Object.freeze({ kind, sceneId, options });
+  }
+  if (kind === 'ending') {
+    return Object.freeze({
+      kind,
+      sceneId,
+      id: saveString(record['id'], 'state.view.id'),
+      title: saveString(record['title'], 'state.view.title', true),
+    });
+  }
+  return invalidSave('state.view.kind is unsupported.');
+}
+
+/** Parse and bound-check imported JSON before it is allowed near live runtime state. */
+export function parseNarrativeSave(input: unknown): NarrativeSave {
+  let value = input;
+  if (typeof input === 'string') {
+    if (input.length > MAX_SAVE_JSON_LENGTH) return invalidSave('JSON input is too large.');
+    try {
+      value = JSON.parse(input) as unknown;
+    } catch {
+      return invalidSave('input is not valid JSON.');
+    }
+  }
+  const root = saveRecord(value, 'save');
+  if (root['format'] !== 'rpg-narrative-engine-save') {
+    return invalidSave('format is unsupported.');
+  }
+  if (root['formatVersion'] !== 1) return invalidSave('formatVersion is unsupported.');
+  const game = saveRecord(root['game'], 'game');
+  const buildIdentity = saveString(game['buildIdentity'], 'game.buildIdentity');
+  if (!BUILD_IDENTITY_PATTERN.test(buildIdentity)) {
+    return invalidSave('game.buildIdentity must be a lowercase SHA-256 hash.');
+  }
+  if (game['formatVersion'] !== 1) return invalidSave('game.formatVersion is unsupported.');
+  const state = saveRecord(root['state'], 'state');
+  const calls = Object.freeze(
+    saveArray(state['calls'], 'state.calls', MAX_SAVE_STACK_DEPTH).map((call, index) => {
+      const record = saveRecord(call, `state.calls[${index}]`);
+      return Object.freeze({
+        sceneId: saveString(record['sceneId'], `state.calls[${index}].sceneId`),
+        frames: parseFrameSaves(record['frames'], `state.calls[${index}].frames`),
+      });
+    }),
+  );
+  const pendingChoiceIds = Object.freeze(
+    saveArray(state['pendingChoiceIds'], 'state.pendingChoiceIds', MAX_SAVE_COLLECTION_LENGTH).map(
+      (id, index) => saveString(id, `state.pendingChoiceIds[${index}]`),
+    ),
+  );
+  return Object.freeze({
+    format: 'rpg-narrative-engine-save',
+    formatVersion: 1,
+    game: Object.freeze({ buildIdentity, formatVersion: 1 }),
+    state: Object.freeze({
+      sceneId: saveString(state['sceneId'], 'state.sceneId'),
+      variables: parseSaveVariables(state['variables']),
+      frames: parseFrameSaves(state['frames'], 'state.frames'),
+      calls,
+      view: parseSaveView(state['view']),
+      pendingChoiceIds,
+    }),
+  });
+}
+
 /** Deterministic, UI-independent interpreter for compiled narrative games. */
 export class NarrativeRuntime {
   readonly game: CompiledGame;
@@ -148,18 +461,27 @@ export class NarrativeRuntime {
   private readonly initialVariables: Readonly<Record<string, NarrativeValue>>;
   private readonly onEffect: ((effect: EffectInstruction) => void) | undefined;
   private readonly stepBudget: number;
+  private readonly buildIdentity: string | undefined;
   private frames: Frame[] = [];
   private calls: CallContinuation[] = [];
   private currentSceneId = '';
   private currentView: RuntimeView | null = null;
   private pendingChoices: readonly CompiledChoiceOption[] = [];
+  private pendingChoiceContext: PendingChoiceContext | null = null;
 
   constructor(game: CompiledGame, options: RuntimeOptions = {}) {
     this.game = game;
     this.initialVariables = { ...options.initialVariables };
-    this.variables = {};
+    this.variables = Object.create(null) as Record<string, NarrativeValue>;
     this.onEffect = options.onEffect;
     this.stepBudget = options.stepBudget ?? 10_000;
+    if (
+      options.buildIdentity !== undefined &&
+      !BUILD_IDENTITY_PATTERN.test(options.buildIdentity)
+    ) {
+      throw new NarrativeRuntimeError('Runtime buildIdentity must be a lowercase SHA-256 hash.');
+    }
+    this.buildIdentity = options.buildIdentity;
     this.restart();
   }
 
@@ -179,6 +501,7 @@ export class NarrativeRuntime {
     this.calls = [];
     this.currentView = null;
     this.pendingChoices = [];
+    this.pendingChoiceContext = null;
     this.currentSceneId = '';
     for (const key of Object.keys(this.variables)) {
       delete this.variables[key];
@@ -210,8 +533,27 @@ export class NarrativeRuntime {
     }
     this.currentView = null;
     this.pendingChoices = [];
+    const context = this.pendingChoiceContext;
+    this.pendingChoiceContext = null;
     if (option.instructions.length > 0) {
-      this.frames.push({ instructions: option.instructions, index: 0 });
+      if (context === null) {
+        throw new NarrativeRuntimeError('The active choice has no execution location.');
+      }
+      this.frames.push({
+        instructions: option.instructions,
+        block: Object.freeze({
+          sceneId: context.block.sceneId,
+          path: Object.freeze([
+            ...context.block.path,
+            Object.freeze({
+              kind: 'choice' as const,
+              instructionIndex: context.instructionIndex,
+              optionId: option.id,
+            }),
+          ]),
+        }),
+        index: 0,
+      });
     }
     this.advance();
     return this.view;
@@ -221,13 +563,208 @@ export class NarrativeRuntime {
     return Object.freeze({ ...this.variables });
   }
 
+  createSave(): NarrativeSave {
+    if (this.buildIdentity === undefined) {
+      throw new NarrativeRuntimeError(
+        'This runtime has no canonical build identity, so it cannot create a compatible save.',
+      );
+    }
+    const frameSave = (frame: Frame): RuntimeFrameSave => ({
+      block: frame.block,
+      index: frame.index,
+    });
+    return parseNarrativeSave({
+      format: 'rpg-narrative-engine-save',
+      formatVersion: 1,
+      game: { buildIdentity: this.buildIdentity, formatVersion: this.game.formatVersion },
+      state: {
+        sceneId: this.currentSceneId,
+        variables: this.variables,
+        frames: this.frames.map(frameSave),
+        calls: this.calls.map((call) => ({
+          sceneId: call.sceneId,
+          frames: call.frames.map(frameSave),
+        })),
+        view: this.view,
+        pendingChoiceIds: this.pendingChoices.map((choice) => choice.id),
+      },
+    });
+  }
+
+  serializeSave(): string {
+    return `${JSON.stringify(this.createSave())}\n`;
+  }
+
+  loadSave(input: unknown): RuntimeView {
+    if (this.buildIdentity === undefined) {
+      throw new NarrativeRuntimeError(
+        'This runtime has no canonical build identity, so it cannot load a compatible save.',
+      );
+    }
+    const save = parseNarrativeSave(input);
+    if (save.game.buildIdentity !== this.buildIdentity) {
+      throw new NarrativeRuntimeError(
+        'This save belongs to a different build of the game and cannot be loaded safely.',
+      );
+    }
+    const state = save.state;
+    if (this.game.scenes[state.sceneId] === undefined) {
+      return invalidSave(`scene ${JSON.stringify(state.sceneId)} does not exist in this build.`);
+    }
+    if (state.view.sceneId !== state.sceneId) {
+      return invalidSave('state.view.sceneId does not match state.sceneId.');
+    }
+    const frames = state.frames.map((frame, index) =>
+      this.resolveFrameSave(frame, state.sceneId, `state.frames[${index}]`),
+    );
+    const calls = state.calls.map((call, callIndex): CallContinuation => {
+      if (this.game.scenes[call.sceneId] === undefined) {
+        return invalidSave(`state.calls[${callIndex}].sceneId does not exist in this build.`);
+      }
+      return {
+        sceneId: call.sceneId,
+        frames: call.frames.map((frame, frameIndex) =>
+          this.resolveFrameSave(
+            frame,
+            call.sceneId,
+            `state.calls[${callIndex}].frames[${frameIndex}]`,
+          ),
+        ),
+      };
+    });
+
+    let pendingChoices: readonly CompiledChoiceOption[] = [];
+    let pendingChoiceContext: PendingChoiceContext | null = null;
+    if (state.view.kind === 'choice') {
+      const frame = frames.at(-1);
+      if (frame === undefined || frame.index === 0) {
+        return invalidSave('a choice view requires an active instruction frame.');
+      }
+      const instructionIndex = frame.index - 1;
+      const instruction = frame.instructions[instructionIndex];
+      if (instruction?.kind !== 'choices') {
+        return invalidSave('the active frame is not suspended at a choice instruction.');
+      }
+      const seen = new Set<string>();
+      pendingChoices = state.pendingChoiceIds.map((id) => {
+        if (seen.has(id)) return invalidSave(`pending choice ${JSON.stringify(id)} is duplicated.`);
+        seen.add(id);
+        const option = instruction.options.find((candidate) => candidate.id === id);
+        if (option === undefined) {
+          return invalidSave(`pending choice ${JSON.stringify(id)} does not exist in this build.`);
+        }
+        return option;
+      });
+      const visibleOptions = state.view.options;
+      if (
+        pendingChoices.length !== visibleOptions.length ||
+        pendingChoices.some((option, index) => {
+          const visible = visibleOptions[index];
+          return (
+            visible === undefined || option.id !== visible.id || option.label !== visible.label
+          );
+        })
+      ) {
+        return invalidSave('the visible choices do not match the saved execution state.');
+      }
+      pendingChoiceContext = Object.freeze({ block: frame.block, instructionIndex });
+    } else {
+      if (state.pendingChoiceIds.length > 0) {
+        return invalidSave('pending choices are present without a choice view.');
+      }
+      const frame = frames.at(-1);
+      const instruction =
+        frame === undefined || frame.index === 0 ? undefined : frame.instructions[frame.index - 1];
+      if (state.view.kind === 'text') {
+        if (instruction?.kind !== 'say') {
+          return invalidSave('the active frame is not suspended at a text instruction.');
+        }
+        if (
+          instruction.contentId !== state.view.contentId ||
+          instruction.speaker?.reference !== state.view.speaker?.reference ||
+          instruction.speaker?.variant !== state.view.speaker?.variant ||
+          (instruction.speaker === null) !== (state.view.speaker === null)
+        ) {
+          return invalidSave('the visible text metadata does not match its instruction.');
+        }
+      } else if (instruction === undefined) {
+        if (calls.length > 0 || state.view.id !== 'complete' || state.view.title !== 'The End') {
+          return invalidSave('the natural ending does not match completed execution state.');
+        }
+      } else if (
+        instruction.kind !== 'ending' ||
+        instruction.id !== state.view.id ||
+        instruction.title !== state.view.title
+      ) {
+        return invalidSave('the visible ending does not match its instruction.');
+      }
+    }
+
+    this.frames = frames;
+    this.calls = calls;
+    this.currentSceneId = state.sceneId;
+    this.currentView = state.view;
+    this.pendingChoices = pendingChoices;
+    this.pendingChoiceContext = pendingChoiceContext;
+    for (const key of Object.keys(this.variables)) delete this.variables[key];
+    Object.assign(this.variables, state.variables);
+    return this.view;
+  }
+
   private enterScene(sceneId: string): void {
     const scene = this.game.scenes[sceneId];
     if (scene === undefined) {
       throw new NarrativeRuntimeError(`Scene ${JSON.stringify(sceneId)} does not exist.`);
     }
     this.currentSceneId = sceneId;
-    this.frames = [{ instructions: scene.instructions, index: 0 }];
+    this.frames = [
+      {
+        instructions: scene.instructions,
+        block: Object.freeze({ sceneId, path: Object.freeze([]) }),
+        index: 0,
+      },
+    ];
+  }
+
+  private resolveFrameSave(save: RuntimeFrameSave, sceneId: string, context: string): Frame {
+    if (save.block.sceneId !== sceneId) {
+      return invalidSave(`${context}.block.sceneId does not match its stack scene.`);
+    }
+    const instructions = this.resolveInstructionBlock(save.block, context);
+    if (save.index > instructions.length) {
+      return invalidSave(`${context}.index is outside its instruction block.`);
+    }
+    return { instructions, block: save.block, index: save.index };
+  }
+
+  private resolveInstructionBlock(
+    block: RuntimeInstructionBlockReference,
+    context: string,
+  ): readonly CompiledInstruction[] {
+    const scene = this.game.scenes[block.sceneId];
+    if (scene === undefined) {
+      return invalidSave(`${context}.block.sceneId does not exist in this build.`);
+    }
+    let instructions = scene.instructions;
+    for (const [index, step] of block.path.entries()) {
+      const instruction = instructions[step.instructionIndex];
+      if (step.kind === 'branch') {
+        if (instruction?.kind !== 'branch') {
+          return invalidSave(`${context}.block.path[${index}] does not reference a branch.`);
+        }
+        instructions = step.arm === 'then' ? instruction.then : instruction.otherwise;
+      } else {
+        if (instruction?.kind !== 'choices') {
+          return invalidSave(`${context}.block.path[${index}] does not reference choices.`);
+        }
+        const option = instruction.options.find((candidate) => candidate.id === step.optionId);
+        if (option === undefined) {
+          return invalidSave(`${context}.block.path[${index}] references a missing choice option.`);
+        }
+        instructions = option.instructions;
+      }
+    }
+    return instructions;
   }
 
   private evaluate(expression: CompiledExpression): NarrativeValue {
@@ -381,7 +918,8 @@ export class NarrativeRuntime {
         };
         return;
       }
-      const instruction = frame.instructions[frame.index];
+      const instructionIndex = frame.index;
+      const instruction = frame.instructions[instructionIndex];
       if (instruction === undefined) {
         this.frames.pop();
         continue;
@@ -404,7 +942,23 @@ export class NarrativeRuntime {
           const selected = requireBoolean(this.evaluate(instruction.condition), 'Branch condition')
             ? instruction.then
             : instruction.otherwise;
-          if (selected.length > 0) this.frames.push({ instructions: selected, index: 0 });
+          if (selected.length > 0) {
+            this.frames.push({
+              instructions: selected,
+              block: Object.freeze({
+                sceneId: frame.block.sceneId,
+                path: Object.freeze([
+                  ...frame.block.path,
+                  Object.freeze({
+                    kind: 'branch' as const,
+                    instructionIndex,
+                    arm: selected === instruction.then ? ('then' as const) : ('otherwise' as const),
+                  }),
+                ]),
+              }),
+              index: 0,
+            });
+          }
           break;
         }
         case 'choices': {
@@ -415,6 +969,7 @@ export class NarrativeRuntime {
           );
           if (options.length === 0) break;
           this.pendingChoices = options;
+          this.pendingChoiceContext = Object.freeze({ block: frame.block, instructionIndex });
           this.currentView = {
             kind: 'choice',
             sceneId: this.currentSceneId,

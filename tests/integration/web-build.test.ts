@@ -40,6 +40,15 @@ describe('web project build', () => {
       'web/folder/assets/player.css',
       'web/folder/assets/player.js',
     ]);
+    const folderHtml = folder.files.find(({ path }) => path === 'web/folder/index.html');
+    const playerJavaScript = folder.files.find(
+      ({ path }) => path === 'web/folder/assets/player.js',
+    );
+    expect(folderHtml?.content).toContain(`data-game-bundle-hash="${first.gameBundleHash}"`);
+    expect(folderHtml?.content).toContain('data-project-id="org.example.first-story"');
+    expect(folderHtml?.content).toContain('data-saves="true"');
+    expect(playerJavaScript?.content).toContain('Save game');
+    expect(playerJavaScript?.content).toContain('Load game');
 
     const zip = first.artifacts.find((artifact) => artifact.target === 'web-zip');
     const secondZip = second.artifacts.find((artifact) => artifact.target === 'web-zip');
@@ -58,6 +67,7 @@ describe('web project build', () => {
     expect(single.file.content).toContain('Content-Security-Policy');
     expect(single.file.content).toContain('id="rpgne-game"');
     expect(single.file.content).toContain('The Road Between');
+    expect(single.file.content).toContain(`data-game-bundle-hash="${first.gameBundleHash}"`);
 
     const manifestFile = first.outputFiles.find((file) => file.path === 'artifact-manifest.json');
     if (manifestFile === undefined || typeof manifestFile.content !== 'string') {

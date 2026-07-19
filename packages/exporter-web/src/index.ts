@@ -19,6 +19,7 @@ export interface WebExportMetadata {
   readonly version: string;
   readonly slug: string;
   readonly language: string;
+  readonly saves: boolean;
 }
 
 export interface WebExportRequest {
@@ -145,19 +146,23 @@ async function exportedFile(
   });
 }
 
-function pageBody(metadata: WebExportMetadata, playerAttributes = ''): string {
+function pageBody(
+  metadata: WebExportMetadata,
+  gameBundleHash: string,
+  playerAttributes = '',
+): string {
   return `<main class="rpgne-shell">
       <header class="rpgne-header">
         <p class="rpgne-brand">RPG Narrative Engine</p>
         <p class="rpgne-version">Version ${escapeHtml(metadata.version)}</p>
       </header>
       <h1 class="rpgne-title">${escapeHtml(metadata.title)}</h1>
-      <div id="player" class="rpgne-player-frame"${playerAttributes}></div>
+      <div id="player" class="rpgne-player-frame" data-project-id="${escapeHtml(metadata.projectId)}" data-game-bundle-hash="${gameBundleHash}" data-saves="${String(metadata.saves)}"${playerAttributes}></div>
       <footer class="rpgne-footer">Created with RPG Narrative Engine</footer>
     </main>`;
 }
 
-function folderHtml(request: WebExportRequest): string {
+function folderHtml(request: WebExportRequest, gameBundleHash: string): string {
   const basePath = normalizedBasePath(request.basePath);
   const title = escapeHtml(request.metadata.title);
   const bundleUrl = `${basePath}game-bundle.json`;
@@ -174,14 +179,18 @@ function folderHtml(request: WebExportRequest): string {
     <link rel="stylesheet" href="${escapeHtml(`${basePath}assets/player.css`)}" />
   </head>
   <body>
-    ${pageBody(request.metadata, ` data-game-bundle="${escapeHtml(bundleUrl)}"`)}
+    ${pageBody(request.metadata, gameBundleHash, ` data-game-bundle="${escapeHtml(bundleUrl)}"`)}
     <script src="${escapeHtml(`${basePath}assets/player.js`)}"></script>
   </body>
 </html>
 `;
 }
 
-async function singleHtml(request: WebExportRequest, gameJson: string): Promise<string> {
+async function singleHtml(
+  request: WebExportRequest,
+  gameJson: string,
+  gameBundleHash: string,
+): Promise<string> {
   const styles = inlineStyle(webPlayerStyles.trim());
   const script = inlineScript(webPlayerJavaScript.trim());
   const styleHash = await sha256Base64(styles);
@@ -200,7 +209,7 @@ async function singleHtml(request: WebExportRequest, gameJson: string): Promise<
     <style>${styles}</style>
   </head>
   <body>
-    ${pageBody(request.metadata)}
+    ${pageBody(request.metadata, gameBundleHash)}
     <script id="rpgne-game" type="application/json">${embeddedJson(gameJson)}</script>
     <script>${script}</script>
   </body>
@@ -212,7 +221,7 @@ export async function createWebFolderExport(request: WebExportRequest): Promise<
   const gameJson = `${canonicalJson(request.game)}\n`;
   const contentHash = await sha256Hex(gameJson);
   const files = await Promise.all([
-    exportedFile('index.html', 'text/html;charset=utf-8', folderHtml(request)),
+    exportedFile('index.html', 'text/html;charset=utf-8', folderHtml(request, contentHash)),
     exportedFile('game-bundle.json', 'application/json;charset=utf-8', gameJson),
     exportedFile('assets/player.css', 'text/css;charset=utf-8', `${webPlayerStyles.trim()}\n`),
     exportedFile(
@@ -250,7 +259,7 @@ export async function createWebSingleExport(request: WebExportRequest): Promise<
     file: await exportedFile(
       `${request.metadata.slug}-${request.metadata.version}.html`,
       'text/html;charset=utf-8',
-      await singleHtml(request, gameJson),
+      await singleHtml(request, gameJson, contentHash),
     ),
   });
 }

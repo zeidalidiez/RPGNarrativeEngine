@@ -222,6 +222,7 @@ export async function buildWebProject(request: BuildProjectRequest): Promise<Bui
     version: loaded.manifest.project.version,
     slug: loaded.manifest.distribution.slug,
     language: loaded.manifest.project.defaultLocale,
+    saves: loaded.manifest.player.saves,
   });
   const exportRequest = Object.freeze({
     game,

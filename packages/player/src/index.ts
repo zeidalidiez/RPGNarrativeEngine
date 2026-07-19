@@ -8,11 +8,28 @@ import {
 export interface NarrativePlayerOptions {
   readonly initialVariables?: Readonly<Record<string, NarrativeValue>>;
   readonly onEffect?: (effect: EffectInstruction) => void;
+  readonly save?: NarrativePlayerSaveOptions;
+}
+
+export interface NarrativeSaveStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+export interface NarrativePlayerSaveOptions {
+  /** Canonical SHA-256 identity of the game bundle being played. */
+  readonly buildIdentity: string;
+  /** Stable project-scoped slot name. */
+  readonly key: string;
+  readonly storage: NarrativeSaveStorage;
 }
 
 export interface NarrativePlayerController {
   readonly runtime: NarrativeRuntime;
   render(): void;
+  hasSave(): boolean;
+  save(): void;
+  load(): RuntimeView;
   destroy(): void;
 }
 
@@ -66,6 +83,47 @@ export function mountNarrativePlayer(
   const stage = document.createElement('div');
   stage.className = 'nre-stage';
   stage.setAttribute('aria-live', 'polite');
+  let saveStatus: HTMLElement | null = null;
+  let loadButton: HTMLButtonElement | null = null;
+  if (options.save !== undefined) {
+    const saveTools = document.createElement('div');
+    saveTools.className = 'nre-save-tools';
+    saveTools.setAttribute('aria-label', 'Saved game controls');
+    const saveButton = button(document, 'Save game', 'nre-button nre-save');
+    loadButton = button(document, 'Load game', 'nre-button nre-load');
+    saveStatus = document.createElement('p');
+    saveStatus.className = 'nre-save-status';
+    saveStatus.setAttribute('role', 'status');
+    saveStatus.setAttribute('aria-live', 'polite');
+    saveTools.append(saveButton, loadButton, saveStatus);
+    root.append(saveTools);
+    saveButton.addEventListener('click', () => {
+      try {
+        saveGame();
+        if (saveStatus !== null) saveStatus.textContent = 'Game saved.';
+      } catch (error) {
+        if (saveStatus !== null) {
+          saveStatus.textContent =
+            error instanceof Error
+              ? `Could not save: ${error.message}`
+              : 'Could not save the game.';
+        }
+      }
+    });
+    loadButton.addEventListener('click', () => {
+      try {
+        loadGame();
+        if (saveStatus !== null) saveStatus.textContent = 'Game loaded.';
+      } catch (error) {
+        if (saveStatus !== null) {
+          saveStatus.textContent =
+            error instanceof Error
+              ? `Could not load: ${error.message}`
+              : 'Could not load the game.';
+        }
+      }
+    });
+  }
   root.append(stage);
   container.replaceChildren(root);
 
@@ -74,8 +132,37 @@ export function mountNarrativePlayer(
       ? {}
       : { initialVariables: options.initialVariables }),
     ...(options.onEffect === undefined ? {} : { onEffect: options.onEffect }),
+    ...(options.save === undefined ? {} : { buildIdentity: options.save.buildIdentity }),
   };
   const runtime = new NarrativeRuntime(game, runtimeOptions);
+
+  function hasSave(): boolean {
+    if (options.save === undefined) return false;
+    try {
+      return options.save.storage.getItem(options.save.key) !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  function refreshLoadAvailability(): void {
+    if (loadButton !== null) loadButton.disabled = !hasSave();
+  }
+
+  function saveGame(): void {
+    if (options.save === undefined) throw new Error('Saving is not enabled for this game.');
+    options.save.storage.setItem(options.save.key, runtime.serializeSave());
+    refreshLoadAvailability();
+  }
+
+  function loadGame(): RuntimeView {
+    if (options.save === undefined) throw new Error('Loading is not enabled for this game.');
+    const saved = options.save.storage.getItem(options.save.key);
+    if (saved === null) throw new Error('No saved game is available.');
+    const view = runtime.loadSave(saved);
+    render();
+    return view;
+  }
 
   function run(action: () => RuntimeView): void {
     try {
@@ -154,9 +241,13 @@ export function mountNarrativePlayer(
   }
 
   render();
+  refreshLoadAvailability();
   return {
     runtime,
     render,
+    hasSave,
+    save: saveGame,
+    load: loadGame,
     destroy() {
       root.remove();
     },
