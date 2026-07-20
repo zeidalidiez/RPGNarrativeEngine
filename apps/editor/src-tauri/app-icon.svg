@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="RNE">
+  <rect width="512" height="512" rx="112" fill="#111318" />
+  <rect
+    x="28"
+    y="28"
+    width="456"
+    height="456"
+    rx="92"
+    fill="none"
+    stroke="#f0a84b"
+    stroke-width="14"
+  />
+  <path
+    fill="#f0a84b"
+    fill-rule="evenodd"
+    d="M82 336V176h60c42 0 66 20 66 54 0 23-12 40-32 49l40 57h-42l-34-50h-20v50H82Zm38-126v44h20c19 0 30-7 30-22s-11-22-30-22h-20Z"
+  />
+  <path fill="#f0a84b" d="M228 336V176h38l50 90v-90h38v160h-36l-52-90v90h-38Z" />
+  <path fill="#f0a84b" d="M370 336V176h88v34h-50v28h44v33h-44v31h52v34h-90Z" />
+</svg>

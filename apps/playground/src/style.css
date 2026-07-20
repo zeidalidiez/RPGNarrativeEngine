@@ -108,6 +108,35 @@ button {
   gap: 0.55rem;
 }
 
+.native-project-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.3rem 0.25rem 0.7rem;
+  border: 1px solid #30343d;
+  border-radius: 0.7rem;
+  background: #12151a;
+}
+
+.native-project-status {
+  max-width: 12rem;
+  overflow: hidden;
+  color: #8f96a2;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.native-project-status[data-state='dirty'] {
+  color: #efbd75;
+}
+
+.native-project-status[data-state='conflict'],
+.native-project-status[data-state='error'] {
+  color: #ff9386;
+}
+
 .button {
   min-height: 2.5rem;
   padding: 0.55rem 0.9rem;
@@ -140,6 +169,17 @@ button {
 .button-build:hover:not(:disabled) {
   border-color: #568879;
   background: #223a34;
+}
+
+.button-save:not(:disabled) {
+  color: #d9c899;
+  border-color: #6a5934;
+  background: #31291a;
+}
+
+.button-save:hover:not(:disabled) {
+  border-color: #9a7c43;
+  background: #3c311d;
 }
 
 .button-primary {
@@ -1700,6 +1740,16 @@ kbd {
   .header-actions {
     width: 100%;
     flex-wrap: wrap;
+  }
+
+  .native-project-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .native-project-status {
+    max-width: none;
+    flex: 1 1 100%;
   }
 
   .button {

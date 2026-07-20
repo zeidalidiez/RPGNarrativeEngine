@@ -24,6 +24,17 @@
           <button id="project-button" class="button button-subtle" type="button">
             Open project
           </button>
+          <div id="native-project-actions" class="native-project-actions" hidden>
+            <span id="native-project-status" class="native-project-status" role="status"
+              >Open a project to save</span
+            >
+            <button id="save-button" class="button button-save" type="button" disabled>
+              Save project
+            </button>
+            <button id="reload-button" class="button button-subtle" type="button" disabled>
+              Reload
+            </button>
+          </div>
           <button id="open-button" class="button button-subtle" type="button">Open .story</button>
           <button id="download-button" class="button button-subtle" type="button">
             Download file
@@ -185,7 +196,7 @@
         </header>
 
         <div class="build-dialog-content">
-          <p class="build-intro">
+          <p id="build-intro" class="build-intro">
             Create distributable files from the current in-memory project. These are one-run
             choices; your <code>project.toml</code> is not rewritten.
           </p>

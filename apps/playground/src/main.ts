@@ -29,6 +29,7 @@ import {
   serializeStoryMapLayout,
   type StoryMapPosition,
 } from './editor-metadata.js';
+import { createNativeHost, type NativeProject } from './native-host.js';
 import { renameProjectEntryScene } from './project-source.js';
 import starterStory from './starter.story?raw';
 import { StoryMapEditor, type StoryMapElements } from './story-map.js';
@@ -53,6 +54,7 @@ interface ProjectSession {
   readonly kind: 'project';
   name: string;
   readonly rootName: string | null;
+  readonly nativeSessionId: string | null;
   readonly files: EditorFile[];
 }
 
@@ -89,6 +91,12 @@ const buildProgress = required<HTMLElement>('#build-progress');
 const buildResults = required<HTMLElement>('#build-results');
 const buildHash = required<HTMLElement>('#build-hash');
 const artifactList = required<HTMLElement>('#artifact-list');
+const buildIntro = required<HTMLElement>('#build-intro');
+const buildResultsHeading = required<HTMLElement>('#build-results-heading');
+const nativeProjectActions = required<HTMLElement>('#native-project-actions');
+const nativeProjectStatus = required<HTMLElement>('#native-project-status');
+const saveButton = required<HTMLButtonElement>('#save-button');
+const reloadButton = required<HTMLButtonElement>('#reload-button');
 const visualModeButton = required<HTMLButtonElement>('#visual-mode-button');
 const storyMapModeButton = required<HTMLButtonElement>('#story-map-mode-button');
 const sourceModeButton = required<HTMLButtonElement>('#source-mode-button');
@@ -123,6 +131,80 @@ let activePath = '';
 let structuredEditor: StructuredSceneEditor | null = null;
 let storyMap: StoryMapEditor | null = null;
 let authoringMode: 'map' | 'source' | 'visual' = 'visual';
+const nativeHost = await createNativeHost();
+let savedProjectFingerprint: string | null = null;
+let externalChangePaths: readonly string[] = [];
+let persistenceBusy: string | null = null;
+let persistenceError: string | null = null;
+let checkingExternalChanges = false;
+
+function messageFor(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function nativeProjectSession(): ProjectSession | null {
+  return session.kind === 'project' && session.nativeSessionId !== null ? session : null;
+}
+
+function projectFingerprint(files: readonly EditorFile[]): string {
+  return JSON.stringify(
+    [...files]
+      .sort((left, right) => left.path.localeCompare(right.path))
+      .map((file) => [file.path, file.content]),
+  );
+}
+
+function projectIsDirty(): boolean {
+  const project = nativeProjectSession();
+  return (
+    project !== null &&
+    savedProjectFingerprint !== null &&
+    projectFingerprint(project.files) !== savedProjectFingerprint
+  );
+}
+
+function refreshPersistenceState(): void {
+  nativeProjectActions.hidden = nativeHost === null;
+  if (nativeHost === null) return;
+
+  const project = nativeProjectSession();
+  const dirty = projectIsDirty();
+  let state = 'idle';
+  let label = project === null ? 'Open a project to save' : 'Saved';
+  let title = label;
+  if (persistenceBusy !== null) {
+    state = 'busy';
+    label = persistenceBusy;
+    title = persistenceBusy;
+  } else if (persistenceError !== null) {
+    state = 'error';
+    label = 'Filesystem error';
+    title = persistenceError;
+  } else if (externalChangePaths.length > 0) {
+    state = 'conflict';
+    label = 'Changed on disk';
+    title = `Reload before saving. Changed: ${externalChangePaths.join(', ')}`;
+  } else if (dirty) {
+    state = 'dirty';
+    label = 'Unsaved changes';
+    title = 'This project has changes that have not been written to disk.';
+  }
+
+  nativeProjectStatus.dataset['state'] = state;
+  nativeProjectStatus.textContent = label;
+  nativeProjectStatus.title = title;
+  saveButton.disabled =
+    project === null || !dirty || externalChangePaths.length > 0 || persistenceBusy !== null;
+  reloadButton.disabled = project === null || persistenceBusy !== null;
+  document.title = `${dirty ? '● ' : ''}Creator Studio · RPG Narrative Engine`;
+}
+
+function confirmDiscardChanges(action: string): boolean {
+  return (
+    !projectIsDirty() ||
+    window.confirm(`This project has unsaved changes. ${action} and discard them?`)
+  );
+}
 
 function savedSource(): string {
   try {
@@ -188,6 +270,7 @@ function saveStoryMapLayout(
   const current = editorMetadataFile();
   if (current === undefined) session.files.push({ path: EDITOR_METADATA_PATH, content: source });
   else current.content = source;
+  refreshPersistenceState();
 }
 
 function clearStoryMapLayout(): void {
@@ -259,6 +342,8 @@ function markBuildStale(): void {
     buildResults.hidden = true;
     buildProgress.textContent = 'Project changed. Build again to refresh the artifacts.';
   }
+  persistenceError = null;
+  refreshPersistenceState();
 }
 
 function refreshFileSelector(): void {
@@ -392,6 +477,13 @@ function openAdvancedSource(path: string, from = 0, to = from): void {
 
 function setSession(next: EditorSession, preferredPath?: string): void {
   session = next;
+  savedProjectFingerprint =
+    next.kind === 'project' && next.nativeSessionId !== null
+      ? projectFingerprint(next.files)
+      : null;
+  externalChangePaths = [];
+  persistenceBusy = null;
+  persistenceError = null;
   structuredEditorElements.status.textContent = '';
   storyMapElements.status.textContent = '';
   activePath =
@@ -400,6 +492,7 @@ function setSession(next: EditorSession, preferredPath?: string): void {
       : (next.files[0]?.path ?? '');
   refreshFileSelector();
   activateFile(activePath);
+  refreshPersistenceState();
 }
 
 function sourceForIssue(issue: CompileIssue): string {
@@ -582,8 +675,48 @@ function artifactCard(
   return card;
 }
 
-function renderBuildResult(result: BuildProjectResult): void {
+function nativeOutputCard(outputPath: string, sessionId: string): HTMLElement {
+  const card = document.createElement('article');
+  card.className = 'artifact-card';
+  const copy = document.createElement('div');
+  const name = document.createElement('p');
+  name.className = 'artifact-name';
+  name.textContent = 'Project build folder';
+  const metadata = document.createElement('p');
+  metadata.className = 'artifact-meta';
+  metadata.textContent = `${outputPath} · safely replaced on disk`;
+  copy.append(name, metadata);
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'button button-build';
+  open.textContent = 'Open folder';
+  open.addEventListener('click', () => {
+    if (nativeHost === null) return;
+    open.disabled = true;
+    void nativeHost
+      .openProjectOutput(sessionId)
+      .catch((error: unknown) => {
+        buildProgress.className = 'build-progress build-error';
+        buildProgress.textContent = messageFor(error);
+      })
+      .finally(() => {
+        open.disabled = false;
+      });
+  });
+  card.append(copy, open);
+  return card;
+}
+
+function renderBuildResult(
+  result: BuildProjectResult,
+  nativeOutput: { readonly path: string; readonly sessionId: string } | null,
+): void {
   artifactList.replaceChildren();
+  buildResultsHeading.textContent =
+    nativeOutput === null ? 'Ready to download' : 'Written to project';
+  if (nativeOutput !== null) {
+    artifactList.append(nativeOutputCard(nativeOutput.path, nativeOutput.sessionId));
+  }
   for (const artifact of result.artifacts) {
     if (artifact.kind !== 'file') continue;
     if (artifact.target === 'web-zip') {
@@ -638,6 +771,25 @@ function openBuildDialog(): void {
   buildProgress.className = 'build-progress';
   try {
     const project = loadNarrativeProject(session.files);
+    buildIntro.replaceChildren();
+    if (session.nativeSessionId === null) {
+      buildIntro.append(
+        'Create distributable files from the current in-memory project. These are one-run choices; your ',
+      );
+      const code = document.createElement('code');
+      code.textContent = 'project.toml';
+      buildIntro.append(code, ' is not rewritten.');
+    } else {
+      buildIntro.append(
+        'Create distributable files from the current workspace and safely write them to ',
+      );
+      const code = document.createElement('code');
+      code.textContent = project.manifest.build.output;
+      buildIntro.append(
+        code,
+        '. Unsaved story edits are included; project source is not rewritten.',
+      );
+    }
     const targets = configuredWebBuildTargets(project.manifest);
     targetWebZip.checked = targets.includes('web') || targets.includes('web-zip');
     targetWebSingle.checked = targets.includes('web-single');
@@ -652,6 +804,7 @@ function openBuildDialog(): void {
 
 async function startBuild(): Promise<void> {
   if (session.kind !== 'project') return;
+  const buildSession = session;
   const targets: WebBuildTarget[] = [];
   if (targetWebZip.checked) targets.push('web-zip');
   if (targetWebSingle.checked) targets.push('web-single');
@@ -667,14 +820,31 @@ async function startBuild(): Promise<void> {
   buildProgress.className = 'build-progress';
   try {
     const result = await buildWebProject({
-      files: session.files,
+      files: buildSession.files,
       targets,
       onProgress(event) {
         buildProgress.textContent = event.message;
       },
     });
-    renderBuildResult(result);
-    buildProgress.textContent = `${result.artifacts.length - 1} distributable outputs created`;
+    let nativeOutput: { readonly path: string; readonly sessionId: string } | null = null;
+    if (nativeHost !== null && buildSession.nativeSessionId !== null) {
+      if (session !== buildSession) {
+        throw new Error('The open project changed while this build was running. Build it again.');
+      }
+      buildProgress.textContent = `Writing ${result.project.build.output}`;
+      const written = await nativeHost.writeProjectBuild(
+        buildSession.nativeSessionId,
+        result.project.build.output,
+        result.project.project.id,
+        result.outputFiles,
+      );
+      nativeOutput = { path: written.outputPath, sessionId: buildSession.nativeSessionId };
+    }
+    renderBuildResult(result, nativeOutput);
+    buildProgress.textContent =
+      nativeOutput === null
+        ? `${result.artifacts.length - 1} distributable outputs created`
+        : `${result.artifacts.length - 1} distributable outputs written to ${nativeOutput.path}`;
   } catch (error) {
     buildFailure(error);
   } finally {
@@ -708,18 +878,117 @@ async function openProjectSelection(fileList: FileList): Promise<void> {
   const files: ProjectFileInput[] = await Promise.all(
     readable.map(async (file) => ({ path: selectedPath(file), content: await file.text() })),
   );
+  openProjectFiles(files);
+}
+
+function openProjectFiles(
+  files: readonly ProjectFileInput[],
+  nativeProject: Pick<NativeProject, 'rootName' | 'sessionId'> | null = null,
+  preferredPath?: string,
+): void {
   const project = loadNarrativeProject(files);
   const next: ProjectSession = {
     kind: 'project',
     name: project.manifest.project.title,
-    rootName: project.rootName,
+    rootName: nativeProject?.rootName ?? project.rootName,
+    nativeSessionId: nativeProject?.sessionId ?? null,
     files: project.files.map(({ path, content }) => ({ path, content })),
   };
   const entryFile = project.storyFiles.find(({ source }) =>
     storyFileDeclaresScene(source, project.manifest.project.entryScene),
   );
-  setSession(next, entryFile?.path ?? project.storyFiles[0]?.path ?? 'project.toml');
+  const selectedPath =
+    preferredPath !== undefined && project.files.some((file) => file.path === preferredPath)
+      ? preferredPath
+      : (entryFile?.path ?? project.storyFiles[0]?.path ?? 'project.toml');
+  setSession(next, selectedPath);
   runStory();
+}
+
+async function openNativeProject(): Promise<void> {
+  if (nativeHost === null || !confirmDiscardChanges('Open another project')) return;
+  persistenceBusy = 'Opening project…';
+  persistenceError = null;
+  refreshPersistenceState();
+  try {
+    const opened = await nativeHost.openProject();
+    if (opened !== null) openProjectFiles(opened.files, opened);
+  } catch (error) {
+    persistenceError = messageFor(error);
+    showOpenProjectError(error);
+  } finally {
+    persistenceBusy = null;
+    refreshPersistenceState();
+  }
+}
+
+async function saveNativeProject(): Promise<void> {
+  const project = nativeProjectSession();
+  if (nativeHost === null || project === null || !projectIsDirty()) return;
+  persistenceBusy = 'Saving…';
+  persistenceError = null;
+  refreshPersistenceState();
+  try {
+    const result = await nativeHost.saveProject(project.nativeSessionId!, project.files);
+    if (session !== project) return;
+    externalChangePaths = result.changedPaths;
+    if (result.changedPaths.length === 0) {
+      savedProjectFingerprint = projectFingerprint(project.files);
+    }
+  } catch (error) {
+    if (session === project) persistenceError = messageFor(error);
+  } finally {
+    persistenceBusy = null;
+    refreshPersistenceState();
+  }
+}
+
+async function reloadNativeProject(): Promise<void> {
+  const project = nativeProjectSession();
+  if (
+    nativeHost === null ||
+    project === null ||
+    !confirmDiscardChanges('Reload the files from disk')
+  ) {
+    return;
+  }
+  persistenceBusy = 'Reloading…';
+  persistenceError = null;
+  refreshPersistenceState();
+  try {
+    const opened = await nativeHost.reloadProject(project.nativeSessionId!);
+    if (session === project) openProjectFiles(opened.files, opened, activePath);
+  } catch (error) {
+    if (session === project) persistenceError = messageFor(error);
+  } finally {
+    persistenceBusy = null;
+    refreshPersistenceState();
+  }
+}
+
+async function checkForExternalProjectChanges(): Promise<void> {
+  const project = nativeProjectSession();
+  if (
+    nativeHost === null ||
+    project === null ||
+    checkingExternalChanges ||
+    persistenceBusy !== null
+  ) {
+    return;
+  }
+  checkingExternalChanges = true;
+  try {
+    const changedPaths = await nativeHost.checkProjectChanges(project.nativeSessionId!);
+    if (session === project) {
+      externalChangePaths = changedPaths;
+      persistenceError = null;
+    }
+  } catch (error) {
+    if (session === project) persistenceError = messageFor(error);
+  } finally {
+    checkingExternalChanges = false;
+    refreshPersistenceState();
+  }
 }
 
 function showOpenError(error: unknown, status: string): void {
@@ -826,8 +1095,18 @@ runButton.addEventListener('click', runStory);
 downloadButton.addEventListener('click', downloadSource);
 buildButton.addEventListener('click', openBuildDialog);
 startBuildButton.addEventListener('click', () => void startBuild());
-openButton.addEventListener('click', () => fileInput.click());
-projectButton.addEventListener('click', () => projectInput.click());
+saveButton.addEventListener('click', () => void saveNativeProject());
+reloadButton.addEventListener('click', () => void reloadNativeProject());
+openButton.addEventListener('click', () => {
+  if (confirmDiscardChanges('Open a story file')) fileInput.click();
+});
+projectButton.addEventListener('click', () => {
+  if (nativeHost === null) {
+    if (confirmDiscardChanges('Open another project')) projectInput.click();
+  } else {
+    void openNativeProject();
+  }
+});
 fileInput.addEventListener('change', () => {
   const file = fileInput.files?.[0];
   if (file === undefined) return;
@@ -876,3 +1155,25 @@ resetButton.addEventListener('click', () => {
   });
   runStory();
 });
+
+document.addEventListener('keydown', (event) => {
+  if (event.key.toLowerCase() !== 's' || (!event.ctrlKey && !event.metaKey)) return;
+  const project = nativeProjectSession();
+  if (project === null) return;
+  event.preventDefault();
+  void saveNativeProject();
+});
+
+window.addEventListener('focus', () => void checkForExternalProjectChanges());
+window.addEventListener('beforeunload', (event) => {
+  if (!projectIsDirty()) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
+
+if (nativeHost !== null) {
+  void nativeHost.guardWindowClose(projectIsDirty).catch((error: unknown) => {
+    persistenceError = messageFor(error);
+    refreshPersistenceState();
+  });
+}

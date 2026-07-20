@@ -6,7 +6,14 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "vite build --config ../../vite.app.config.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "pnpm --filter @rpgnarrativeengine/playground build",
+    "dev": "pnpm --filter @rpgnarrativeengine/playground dev:desktop",
+    "tauri:build": "tauri build",
+    "tauri:dev": "tauri dev",
+    "typecheck": "pnpm --filter @rpgnarrativeengine/playground typecheck"
+  },
+  "devDependencies": {
+    "@rpgnarrativeengine/playground": "workspace:*",
+    "@tauri-apps/cli": "2.11.4"
   }
 }

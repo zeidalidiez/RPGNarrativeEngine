@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Base Tauri APIs for the Creator Studio main window. Filesystem access remains behind custom session-scoped commands.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

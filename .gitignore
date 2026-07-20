@@ -4,6 +4,7 @@ node_modules/
 
 dist/
 build/
+target/
 !packages/build/
 !packages/build/package.json
 !packages/build/tsconfig.json
@@ -12,6 +13,7 @@ build/
 coverage/
 playwright-report/
 test-results/
+apps/editor/src-tauri/gen/schemas/
 
 *.tsbuildinfo
 *.log

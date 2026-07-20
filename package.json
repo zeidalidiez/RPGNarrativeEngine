@@ -16,6 +16,8 @@
     "build:reference": "pnpm --filter @rpgnarrativeengine/showcase build",
     "check": "pnpm format:check && pnpm build && pnpm lint:source && pnpm policy && pnpm typecheck && pnpm test:all && pnpm size && pnpm run licenses && pnpm run sbom",
     "clean": "pnpm -r --if-present run clean",
+    "editor:build": "pnpm --filter @rpgnarrativeengine/editor tauri:build",
+    "editor:dev": "pnpm --filter @rpgnarrativeengine/editor tauri:dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "licenses": "node scripts/dependency-inventory.mjs licenses",

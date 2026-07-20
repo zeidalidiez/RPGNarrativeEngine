@@ -10,11 +10,13 @@
     "@rpgnarrativeengine/compiler": "workspace:*",
     "@rpgnarrativeengine/editor-source": "workspace:*",
     "@rpgnarrativeengine/player": "workspace:*",
-    "@rpgnarrativeengine/project": "workspace:*"
+    "@rpgnarrativeengine/project": "workspace:*",
+    "@tauri-apps/api": "2.11.1"
   },
   "scripts": {
     "build": "vite build --config ../../vite.app.config.ts",
     "dev": "vite --config ../../vite.app.config.ts",
+    "dev:desktop": "vite --config ../../vite.app.config.ts --host 127.0.0.1 --port 1420 --strictPort",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }
