@@ -175,6 +175,7 @@ function folderHtml(request: WebExportRequest, gameBundleHash: string): string {
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self' data:; media-src 'self' data: blob:; base-uri 'none'; form-action 'none'" />
     <meta name="application-name" content="${title}" />
     <meta name="generator" content="RPG Narrative Engine" />
+    <link rel="icon" href="data:," />
     <title>${title}</title>
     <link rel="stylesheet" href="${escapeHtml(`${basePath}assets/player.css`)}" />
   </head>
@@ -205,6 +206,7 @@ async function singleHtml(
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-${scriptHash}'; style-src 'sha256-${styleHash}'; img-src data:; font-src data:; media-src data: blob:; base-uri 'none'; form-action 'none'" />
     <meta name="application-name" content="${title}" />
     <meta name="generator" content="RPG Narrative Engine" />
+    <link rel="icon" href="data:," />
     <title>${title}</title>
     <style>${styles}</style>
   </head>

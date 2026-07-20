@@ -47,8 +47,13 @@ describe('web project build', () => {
     expect(folderHtml?.content).toContain(`data-game-bundle-hash="${first.gameBundleHash}"`);
     expect(folderHtml?.content).toContain('data-project-id="org.example.first-story"');
     expect(folderHtml?.content).toContain('data-saves="true"');
+    expect(folderHtml?.content).toContain('<link rel="icon" href="data:," />');
     expect(playerJavaScript?.content).toContain('Save game');
     expect(playerJavaScript?.content).toContain('Load game');
+    expect(playerJavaScript?.content).toContain('Quick save');
+    expect(playerJavaScript?.content).toContain('Load autosave');
+    expect(playerJavaScript?.content).toContain('Import save');
+    expect(playerJavaScript?.content).toContain('History');
 
     const zip = first.artifacts.find((artifact) => artifact.target === 'web-zip');
     const secondZip = second.artifacts.find((artifact) => artifact.target === 'web-zip');

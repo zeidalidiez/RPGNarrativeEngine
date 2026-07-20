@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CompiledGame, CompiledInstruction } from '../../../packages/ir/src/index.js';
-import { NarrativeRuntime } from '../../../packages/runtime/src/index.js';
+import {
+  NARRATIVE_SAVE_FORMAT_VERSION,
+  NarrativeRuntime,
+  parseNarrativeSave,
+} from '../../../packages/runtime/src/index.js';
 
 const BUILD_A = 'a'.repeat(64);
 const BUILD_B = 'b'.repeat(64);
@@ -85,6 +89,8 @@ describe('runtime saves', () => {
     });
 
     expect(runtime.view).toMatchObject({ kind: 'text', plainText: 'Opening' });
+    expect(runtime.transcript).toMatchObject([{ kind: 'text', contentId: 'opening' }]);
+    expect(runtime.hasRead('opening')).toBe(true);
     runtime.continue();
     expect(runtime.view).toMatchObject({ kind: 'text', sceneId: 'aside' });
     expect(effects).toEqual(['sound']);
@@ -95,11 +101,19 @@ describe('runtime saves', () => {
     const choiceSave = runtime.serializeSave();
     runtime.choose('take');
     expect(runtime.view).toMatchObject({ kind: 'text', plainText: 'Score 3' });
+    expect(runtime.transcript.map((entry) => entry.kind)).toEqual([
+      'text',
+      'text',
+      'choice',
+      'text',
+    ]);
 
     runtime.loadSave(asideSave);
     expect(runtime.view).toMatchObject({ kind: 'text', sceneId: 'aside' });
     expect(runtime.snapshotVariables()).toEqual({ score: 1 });
     expect(effects).toEqual(['sound']);
+    expect(runtime.transcript.map((entry) => entry.kind)).toEqual(['text', 'text']);
+    expect(runtime.snapshotReadContentIds()).toEqual(['aside', 'opening']);
 
     runtime.continue();
     expect(runtime.view).toMatchObject({ kind: 'choice' });
@@ -144,5 +158,55 @@ describe('runtime saves', () => {
     expect(Array.from({ length: 5 }, () => runtime.random.nextUint32('combat'))).toEqual(
       expectedCombat,
     );
+  });
+
+  it('migrates schema-1 saves into transcript-aware schema-2 saves', () => {
+    const runtime = new NarrativeRuntime(game(), { buildIdentity: BUILD_A });
+    runtime.continue();
+    const current = JSON.parse(runtime.serializeSave()) as Record<string, unknown> & {
+      state: Record<string, unknown>;
+    };
+    current['formatVersion'] = 1;
+    delete current.state['transcript'];
+    delete current.state['readContentIds'];
+
+    const migrated = parseNarrativeSave(current);
+    expect(migrated.formatVersion).toBe(NARRATIVE_SAVE_FORMAT_VERSION);
+    expect(migrated.state.transcript).toMatchObject([
+      { kind: 'text', sceneId: 'aside', contentId: 'aside' },
+    ]);
+    expect(migrated.state.readContentIds).toEqual(['aside']);
+
+    const restored = new NarrativeRuntime(game(), { buildIdentity: BUILD_A });
+    restored.loadSave(current);
+    expect(restored.view).toMatchObject({ kind: 'text', contentId: 'aside' });
+    expect(restored.transcript).toEqual(migrated.state.transcript);
+  });
+
+  it('runs declared build migrations before validating and mutating live state', () => {
+    const oldRuntime = new NarrativeRuntime(game(), { buildIdentity: BUILD_B });
+    oldRuntime.continue();
+    const oldSave = oldRuntime.serializeSave();
+    const runtime = new NarrativeRuntime(game(), {
+      buildIdentity: BUILD_A,
+      saveMigrations: [
+        {
+          fromBuildIdentity: BUILD_B,
+          toBuildIdentity: BUILD_A,
+          migrate: (save) => ({
+            ...save,
+            game: { ...save.game, buildIdentity: BUILD_A },
+          }),
+        },
+      ],
+    });
+
+    const prepared = runtime.prepareSave(oldSave);
+    expect(prepared.game.buildIdentity).toBe(BUILD_A);
+    expect(runtime.view).toMatchObject({ kind: 'text', contentId: 'opening' });
+
+    runtime.loadSave(oldSave);
+    expect(runtime.view).toMatchObject({ kind: 'text', contentId: 'aside' });
+    expect(runtime.transcript).toHaveLength(2);
   });
 });

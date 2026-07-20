@@ -74,6 +74,17 @@ export interface RuntimeEndingView {
 
 export type RuntimeView = RuntimeChoiceView | RuntimeEndingView | RuntimeTextView;
 
+export interface RuntimeChoiceTranscriptEntry {
+  readonly kind: 'choice';
+  readonly sceneId: string;
+  readonly optionId: string;
+  readonly label: string;
+}
+
+/** Chronological, deterministic player-visible history for the current playthrough. */
+export type RuntimeTranscriptEntry =
+  RuntimeChoiceTranscriptEntry | RuntimeEndingView | RuntimeTextView;
+
 export type RuntimeInstructionBlockStep =
   | {
       readonly kind: 'branch';
@@ -101,10 +112,12 @@ export interface RuntimeCallSave {
   readonly frames: readonly RuntimeFrameSave[];
 }
 
+export const NARRATIVE_SAVE_FORMAT_VERSION = 2 as const;
+
 /** Versioned, host-neutral state captured only while the runtime is suspended at a player view. */
 export interface NarrativeSave {
   readonly format: 'rpg-narrative-engine-save';
-  readonly formatVersion: 1;
+  readonly formatVersion: typeof NARRATIVE_SAVE_FORMAT_VERSION;
   readonly game: {
     readonly buildIdentity: string;
     readonly formatVersion: 1;
@@ -117,7 +130,16 @@ export interface NarrativeSave {
     readonly view: RuntimeView;
     readonly pendingChoiceIds: readonly string[];
     readonly random: NamedRandomSnapshot;
+    readonly transcript: readonly RuntimeTranscriptEntry[];
+    readonly readContentIds: readonly string[];
   };
+}
+
+/** A creator-supplied, deterministic migration between two canonical game builds. */
+export interface NarrativeSaveMigration {
+  readonly fromBuildIdentity: string;
+  readonly toBuildIdentity: string;
+  migrate(save: NarrativeSave): unknown;
 }
 
 export interface RuntimeOptions {
@@ -128,6 +150,8 @@ export interface RuntimeOptions {
   readonly buildIdentity?: string;
   /** Canonical 128-bit seed; hosts may generate one once at the start of a new playthrough. */
   readonly randomSeed?: string;
+  /** Ordered build migrations used only when an imported save does not match this build. */
+  readonly saveMigrations?: readonly NarrativeSaveMigration[];
 }
 
 interface Frame {
@@ -144,6 +168,14 @@ interface CallContinuation {
 interface PendingChoiceContext {
   readonly block: RuntimeInstructionBlockReference;
   readonly instructionIndex: number;
+}
+
+interface ResolvedSaveState {
+  readonly save: NarrativeSave;
+  readonly frames: Frame[];
+  readonly calls: CallContinuation[];
+  readonly pendingChoices: readonly CompiledChoiceOption[];
+  readonly pendingChoiceContext: PendingChoiceContext | null;
 }
 
 export class NarrativeRuntimeError extends Error {
@@ -391,35 +423,35 @@ function parseResolvedInline(value: unknown, context: string, depth: number): Re
   return invalidSave(`${context}.kind is unsupported.`);
 }
 
-function parseSaveView(value: unknown): RuntimeView {
-  const record = saveRecord(value, 'state.view');
+function parseSaveView(value: unknown, context = 'state.view'): RuntimeView {
+  const record = saveRecord(value, context);
   const kind = record['kind'];
-  const sceneId = saveString(record['sceneId'], 'state.view.sceneId');
+  const sceneId = saveString(record['sceneId'], `${context}.sceneId`);
   if (kind === 'text') {
     const speakerValue = record['speaker'];
     let speaker: CompiledSpeaker | null = null;
     if (speakerValue !== null) {
-      const speakerRecord = saveRecord(speakerValue, 'state.view.speaker');
+      const speakerRecord = saveRecord(speakerValue, `${context}.speaker`);
       speaker = Object.freeze({
-        reference: saveString(speakerRecord['reference'], 'state.view.speaker.reference'),
-        variant: nullableSaveString(speakerRecord['variant'], 'state.view.speaker.variant'),
+        reference: saveString(speakerRecord['reference'], `${context}.speaker.reference`),
+        variant: nullableSaveString(speakerRecord['variant'], `${context}.speaker.variant`),
       });
     }
     const content = Object.freeze(
-      saveArray(record['content'], 'state.view.content', MAX_SAVE_COLLECTION_LENGTH).map(
-        (node, index) => parseResolvedInline(node, `state.view.content[${index}]`, 0),
+      saveArray(record['content'], `${context}.content`, MAX_SAVE_COLLECTION_LENGTH).map(
+        (node, index) => parseResolvedInline(node, `${context}.content[${index}]`, 0),
       ),
     );
     const expectedPlainText = plainText(content);
-    const savedPlainText = saveString(record['plainText'], 'state.view.plainText', true);
+    const savedPlainText = saveString(record['plainText'], `${context}.plainText`, true);
     if (savedPlainText !== expectedPlainText) {
-      return invalidSave('state.view.plainText does not match its resolved content.');
+      return invalidSave(`${context}.plainText does not match its resolved content.`);
     }
     return Object.freeze({
       kind,
       sceneId,
       speaker,
-      contentId: nullableSaveString(record['contentId'], 'state.view.contentId'),
+      contentId: nullableSaveString(record['contentId'], `${context}.contentId`),
       content,
       plainText: savedPlainText,
     });
@@ -427,15 +459,15 @@ function parseSaveView(value: unknown): RuntimeView {
   if (kind === 'choice') {
     const seen = new Set<string>();
     const options = Object.freeze(
-      saveArray(record['options'], 'state.view.options', MAX_SAVE_COLLECTION_LENGTH).map(
+      saveArray(record['options'], `${context}.options`, MAX_SAVE_COLLECTION_LENGTH).map(
         (option, index) => {
-          const optionRecord = saveRecord(option, `state.view.options[${index}]`);
-          const id = saveString(optionRecord['id'], `state.view.options[${index}].id`);
-          if (seen.has(id)) return invalidSave(`state.view contains duplicate choice ${id}.`);
+          const optionRecord = saveRecord(option, `${context}.options[${index}]`);
+          const id = saveString(optionRecord['id'], `${context}.options[${index}].id`);
+          if (seen.has(id)) return invalidSave(`${context} contains duplicate choice ${id}.`);
           seen.add(id);
           return Object.freeze({
             id,
-            label: saveString(optionRecord['label'], `state.view.options[${index}].label`, true),
+            label: saveString(optionRecord['label'], `${context}.options[${index}].label`, true),
           });
         },
       ),
@@ -446,11 +478,52 @@ function parseSaveView(value: unknown): RuntimeView {
     return Object.freeze({
       kind,
       sceneId,
-      id: saveString(record['id'], 'state.view.id'),
-      title: saveString(record['title'], 'state.view.title', true),
+      id: saveString(record['id'], `${context}.id`),
+      title: saveString(record['title'], `${context}.title`, true),
     });
   }
-  return invalidSave('state.view.kind is unsupported.');
+  return invalidSave(`${context}.kind is unsupported.`);
+}
+
+function parseTranscriptEntry(value: unknown, context: string): RuntimeTranscriptEntry {
+  const record = saveRecord(value, context);
+  if (record['kind'] === 'choice') {
+    return Object.freeze({
+      kind: 'choice',
+      sceneId: saveString(record['sceneId'], `${context}.sceneId`),
+      optionId: saveString(record['optionId'], `${context}.optionId`),
+      label: saveString(record['label'], `${context}.label`, true),
+    });
+  }
+  const view = parseSaveView(value, context);
+  if (view.kind === 'choice') {
+    return invalidSave(`${context} must record a selected choice, not a choice prompt.`);
+  }
+  return view;
+}
+
+function parseTranscript(value: unknown): readonly RuntimeTranscriptEntry[] {
+  return Object.freeze(
+    saveArray(value, 'state.transcript', MAX_SAVE_COLLECTION_LENGTH).map((entry, index) =>
+      parseTranscriptEntry(entry, `state.transcript[${index}]`),
+    ),
+  );
+}
+
+function parseReadContentIds(value: unknown): readonly string[] {
+  const seen = new Set<string>();
+  return Object.freeze(
+    saveArray(value, 'state.readContentIds', MAX_SAVE_COLLECTION_LENGTH).map((entry, index) => {
+      const id = saveString(entry, `state.readContentIds[${index}]`);
+      if (seen.has(id)) {
+        return invalidSave(
+          `state.readContentIds contains duplicate content ID ${JSON.stringify(id)}.`,
+        );
+      }
+      seen.add(id);
+      return id;
+    }),
+  );
 }
 
 /** Parse and bound-check imported JSON before it is allowed near live runtime state. */
@@ -468,7 +541,10 @@ export function parseNarrativeSave(input: unknown): NarrativeSave {
   if (root['format'] !== 'rpg-narrative-engine-save') {
     return invalidSave('format is unsupported.');
   }
-  if (root['formatVersion'] !== 1) return invalidSave('formatVersion is unsupported.');
+  const sourceFormatVersion = root['formatVersion'];
+  if (sourceFormatVersion !== 1 && sourceFormatVersion !== NARRATIVE_SAVE_FORMAT_VERSION) {
+    return invalidSave('formatVersion is unsupported.');
+  }
   const game = saveRecord(root['game'], 'game');
   const buildIdentity = saveString(game['buildIdentity'], 'game.buildIdentity');
   if (!BUILD_IDENTITY_PATTERN.test(buildIdentity)) {
@@ -490,21 +566,58 @@ export function parseNarrativeSave(input: unknown): NarrativeSave {
       (id, index) => saveString(id, `state.pendingChoiceIds[${index}]`),
     ),
   );
+  const view = parseSaveView(state['view']);
+  const transcript =
+    sourceFormatVersion === 1
+      ? Object.freeze<RuntimeTranscriptEntry[]>(view.kind === 'choice' ? [] : [view])
+      : parseTranscript(state['transcript']);
+  const readContentIds =
+    sourceFormatVersion === 1
+      ? Object.freeze(
+          view.kind === 'text' && view.contentId !== null ? [view.contentId] : ([] as string[]),
+        )
+      : parseReadContentIds(state['readContentIds']);
+  const readSet = new Set(readContentIds);
+  for (const [index, entry] of transcript.entries()) {
+    if (entry.kind === 'text' && entry.contentId !== null && !readSet.has(entry.contentId)) {
+      return invalidSave(
+        `state.transcript[${index}].contentId is missing from state.readContentIds.`,
+      );
+    }
+  }
+  if (view.kind !== 'choice') {
+    const latest = transcript.at(-1);
+    if (
+      latest === undefined ||
+      latest.kind !== view.kind ||
+      latest.sceneId !== view.sceneId ||
+      (view.kind === 'text' &&
+        (latest.kind !== 'text' ||
+          latest.contentId !== view.contentId ||
+          latest.plainText !== view.plainText)) ||
+      (view.kind === 'ending' &&
+        (latest.kind !== 'ending' || latest.id !== view.id || latest.title !== view.title))
+    ) {
+      return invalidSave('state.transcript does not end with the visible player view.');
+    }
+  }
   return Object.freeze({
     format: 'rpg-narrative-engine-save',
-    formatVersion: 1,
+    formatVersion: NARRATIVE_SAVE_FORMAT_VERSION,
     game: Object.freeze({ buildIdentity, formatVersion: 1 }),
     state: Object.freeze({
       sceneId: saveString(state['sceneId'], 'state.sceneId'),
       variables: parseSaveVariables(state['variables']),
       frames: parseFrameSaves(state['frames'], 'state.frames'),
       calls,
-      view: parseSaveView(state['view']),
+      view,
       pendingChoiceIds,
       random:
-        state['random'] === undefined
+        sourceFormatVersion === 1 && state['random'] === undefined
           ? new NamedRandom(buildIdentity.slice(0, 32)).snapshot()
           : parseNamedRandomSnapshot(state['random']),
+      transcript,
+      readContentIds,
     }),
   });
 }
@@ -520,12 +633,15 @@ export class NarrativeRuntime {
   private readonly onEffect: ((effect: EffectInstruction) => void) | undefined;
   private readonly stepBudget: number;
   private readonly buildIdentity: string | undefined;
+  private readonly saveMigrationsBySource = new Map<string, NarrativeSaveMigration>();
   private frames: Frame[] = [];
   private calls: CallContinuation[] = [];
   private currentSceneId = '';
   private currentView: RuntimeView | null = null;
   private pendingChoices: readonly CompiledChoiceOption[] = [];
   private pendingChoiceContext: PendingChoiceContext | null = null;
+  private transcriptEntries: RuntimeTranscriptEntry[] = [];
+  private readonly readContentIdSet = new Set<string>();
 
   constructor(game: CompiledGame, options: RuntimeOptions = {}) {
     this.game = game;
@@ -540,6 +656,25 @@ export class NarrativeRuntime {
       throw new NarrativeRuntimeError('Runtime buildIdentity must be a lowercase SHA-256 hash.');
     }
     this.buildIdentity = options.buildIdentity;
+    for (const migration of options.saveMigrations ?? []) {
+      if (
+        !BUILD_IDENTITY_PATTERN.test(migration.fromBuildIdentity) ||
+        !BUILD_IDENTITY_PATTERN.test(migration.toBuildIdentity)
+      ) {
+        throw new NarrativeRuntimeError(
+          'Save migration build identities must be lowercase SHA-256 hashes.',
+        );
+      }
+      if (migration.fromBuildIdentity === migration.toBuildIdentity) {
+        throw new NarrativeRuntimeError('A save migration cannot target its source build.');
+      }
+      if (this.saveMigrationsBySource.has(migration.fromBuildIdentity)) {
+        throw new NarrativeRuntimeError(
+          `More than one save migration starts at ${migration.fromBuildIdentity}.`,
+        );
+      }
+      this.saveMigrationsBySource.set(migration.fromBuildIdentity, migration);
+    }
     this.initialRandomSeed = parseRandomSeed(
       options.randomSeed ?? options.buildIdentity?.slice(0, 32) ?? DEFAULT_RANDOM_SEED,
     );
@@ -558,12 +693,25 @@ export class NarrativeRuntime {
     return this.currentSceneId;
   }
 
+  get transcript(): readonly RuntimeTranscriptEntry[] {
+    return Object.freeze([...this.transcriptEntries]);
+  }
+
+  hasRead(contentId: string): boolean {
+    return this.readContentIdSet.has(contentId);
+  }
+
+  snapshotReadContentIds(): readonly string[] {
+    return Object.freeze([...this.readContentIdSet].sort());
+  }
+
   restart(): RuntimeView {
     this.frames = [];
     this.calls = [];
     this.currentView = null;
     this.pendingChoices = [];
     this.pendingChoiceContext = null;
+    this.transcriptEntries = [];
     this.currentSceneId = '';
     for (const key of Object.keys(this.variables)) {
       delete this.variables[key];
@@ -594,6 +742,12 @@ export class NarrativeRuntime {
         `Choice ${JSON.stringify(optionId)} is not currently available.`,
       );
     }
+    this.recordTranscript({
+      kind: 'choice',
+      sceneId: this.currentSceneId,
+      optionId: option.id,
+      label: option.label,
+    });
     this.currentView = null;
     this.pendingChoices = [];
     const context = this.pendingChoiceContext;
@@ -638,7 +792,7 @@ export class NarrativeRuntime {
     });
     return parseNarrativeSave({
       format: 'rpg-narrative-engine-save',
-      formatVersion: 1,
+      formatVersion: NARRATIVE_SAVE_FORMAT_VERSION,
       game: { buildIdentity: this.buildIdentity, formatVersion: this.game.formatVersion },
       state: {
         sceneId: this.currentSceneId,
@@ -651,6 +805,8 @@ export class NarrativeRuntime {
         view: this.view,
         pendingChoiceIds: this.pendingChoices.map((choice) => choice.id),
         random: this.random.snapshot(),
+        transcript: this.transcriptEntries,
+        readContentIds: this.snapshotReadContentIds(),
       },
     });
   }
@@ -659,18 +815,13 @@ export class NarrativeRuntime {
     return `${JSON.stringify(this.createSave())}\n`;
   }
 
-  loadSave(input: unknown): RuntimeView {
+  private resolveSaveState(input: unknown): ResolvedSaveState {
     if (this.buildIdentity === undefined) {
       throw new NarrativeRuntimeError(
         'This runtime has no canonical build identity, so it cannot load a compatible save.',
       );
     }
-    const save = parseNarrativeSave(input);
-    if (save.game.buildIdentity !== this.buildIdentity) {
-      throw new NarrativeRuntimeError(
-        'This save belongs to a different build of the game and cannot be loaded safely.',
-      );
-    }
+    const save = this.migrateSave(input);
     const state = save.state;
     if (this.game.scenes[state.sceneId] === undefined) {
       return invalidSave(`scene ${JSON.stringify(state.sceneId)} does not exist in this build.`);
@@ -764,16 +915,96 @@ export class NarrativeRuntime {
       }
     }
 
+    return { save, frames, calls, pendingChoices, pendingChoiceContext };
+  }
+
+  /** Validate and migrate an imported save without changing live runtime state. */
+  prepareSave(input: unknown): NarrativeSave {
+    return this.resolveSaveState(input).save;
+  }
+
+  loadSave(input: unknown): RuntimeView {
+    const resolved = this.resolveSaveState(input);
+    const state = resolved.save.state;
     this.random.restore(state.random);
-    this.frames = frames;
-    this.calls = calls;
+    this.frames = resolved.frames;
+    this.calls = resolved.calls;
     this.currentSceneId = state.sceneId;
     this.currentView = state.view;
-    this.pendingChoices = pendingChoices;
-    this.pendingChoiceContext = pendingChoiceContext;
+    this.pendingChoices = resolved.pendingChoices;
+    this.pendingChoiceContext = resolved.pendingChoiceContext;
+    this.transcriptEntries = [...state.transcript];
+    this.readContentIdSet.clear();
+    for (const id of state.readContentIds) this.readContentIdSet.add(id);
     for (const key of Object.keys(this.variables)) delete this.variables[key];
     Object.assign(this.variables, state.variables);
     return this.view;
+  }
+
+  private migrateSave(input: unknown): NarrativeSave {
+    if (this.buildIdentity === undefined) {
+      throw new NarrativeRuntimeError(
+        'This runtime has no canonical build identity, so it cannot load a compatible save.',
+      );
+    }
+    let save = parseNarrativeSave(input);
+    const visited = new Set<string>();
+    while (save.game.buildIdentity !== this.buildIdentity) {
+      const source = save.game.buildIdentity;
+      if (visited.has(source)) {
+        throw new NarrativeRuntimeError('Save migration chain contains a cycle.');
+      }
+      visited.add(source);
+      if (visited.size > 32) {
+        throw new NarrativeRuntimeError('Save migration chain is too long.');
+      }
+      const migration = this.saveMigrationsBySource.get(source);
+      if (migration === undefined) {
+        throw new NarrativeRuntimeError(
+          'This save belongs to a different build of the game and no migration is available.',
+        );
+      }
+      let migrated: unknown;
+      try {
+        migrated = migration.migrate(save);
+      } catch (error) {
+        throw new NarrativeRuntimeError(
+          `Save migration from ${migration.fromBuildIdentity} failed: ${
+            error instanceof Error ? error.message : 'unknown migration error'
+          }`,
+        );
+      }
+      save = parseNarrativeSave(migrated);
+      if (save.game.buildIdentity !== migration.toBuildIdentity) {
+        throw new NarrativeRuntimeError(
+          `Save migration from ${migration.fromBuildIdentity} did not produce its declared target build.`,
+        );
+      }
+    }
+    return save;
+  }
+
+  private recordTranscript(entry: RuntimeTranscriptEntry): void {
+    if (this.transcriptEntries.length === MAX_SAVE_COLLECTION_LENGTH) {
+      this.transcriptEntries.shift();
+    }
+    this.transcriptEntries.push(Object.freeze(entry));
+    if (
+      entry.kind === 'text' &&
+      entry.contentId !== null &&
+      !this.readContentIdSet.has(entry.contentId)
+    ) {
+      if (this.readContentIdSet.size === MAX_SAVE_COLLECTION_LENGTH) {
+        const oldest = this.readContentIdSet.values().next().value;
+        if (oldest !== undefined) this.readContentIdSet.delete(oldest);
+      }
+      this.readContentIdSet.add(entry.contentId);
+    }
+  }
+
+  private presentView(view: RuntimeEndingView | RuntimeTextView): void {
+    this.currentView = view;
+    this.recordTranscript(view);
   }
 
   private enterScene(sceneId: string): void {
@@ -976,12 +1207,12 @@ export class NarrativeRuntime {
           this.frames = continuation.frames;
           continue;
         }
-        this.currentView = {
+        this.presentView({
           kind: 'ending',
           sceneId: this.currentSceneId,
           id: 'complete',
           title: 'The End',
-        };
+        });
         return;
       }
       const instructionIndex = frame.index;
@@ -994,14 +1225,14 @@ export class NarrativeRuntime {
       switch (instruction.kind) {
         case 'say': {
           const content = this.resolveInline(instruction.content);
-          this.currentView = {
+          this.presentView({
             kind: 'text',
             sceneId: this.currentSceneId,
             speaker: instruction.speaker,
             contentId: instruction.contentId,
             content,
             plainText: plainText(content),
-          };
+          });
           return;
         }
         case 'branch': {
@@ -1070,12 +1301,12 @@ export class NarrativeRuntime {
           this.onEffect?.(instruction);
           break;
         case 'ending':
-          this.currentView = {
+          this.presentView({
             kind: 'ending',
             sceneId: this.currentSceneId,
             id: instruction.id,
             title: instruction.title,
-          };
+          });
           return;
       }
     }
