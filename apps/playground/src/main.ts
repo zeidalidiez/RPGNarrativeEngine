@@ -29,6 +29,7 @@ import {
   serializeStoryMapLayout,
   type StoryMapPosition,
 } from './editor-metadata.js';
+import { EditorHistory, type EditorHistoryMove } from './editor-history.js';
 import { createNativeHost, type NativeProject } from './native-host.js';
 import { renameProjectEntryScene } from './project-source.js';
 import starterStory from './starter.story?raw';
@@ -60,6 +61,12 @@ interface ProjectSession {
 
 type EditorSession = ProjectSession | ScratchSession;
 
+interface EditorHistorySnapshot {
+  readonly activePath: string;
+  readonly files: readonly EditorFile[];
+  readonly scratchLayoutSource: string | null;
+}
+
 function required<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
   if (element === null) throw new Error(`Missing playground element ${selector}.`);
@@ -80,6 +87,9 @@ const openButton = required<HTMLButtonElement>('#open-button');
 const projectButton = required<HTMLButtonElement>('#project-button');
 const downloadButton = required<HTMLButtonElement>('#download-button');
 const buildButton = required<HTMLButtonElement>('#build-button');
+const undoButton = required<HTMLButtonElement>('#undo-button');
+const redoButton = required<HTMLButtonElement>('#redo-button');
+const historyStatus = required<HTMLElement>('#history-status');
 const fileInput = required<HTMLInputElement>('#file-input');
 const projectInput = required<HTMLInputElement>('#project-input');
 const buildDialog = required<HTMLDialogElement>('#build-dialog');
@@ -137,6 +147,7 @@ let externalChangePaths: readonly string[] = [];
 let persistenceBusy: string | null = null;
 let persistenceError: string | null = null;
 let checkingExternalChanges = false;
+let editorHistory: EditorHistory<EditorHistorySnapshot> | null = null;
 
 function messageFor(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -154,6 +165,60 @@ function projectFingerprint(files: readonly EditorFile[]): string {
   );
 }
 
+function cloneEditorFiles(files: readonly EditorFile[]): readonly EditorFile[] {
+  return Object.freeze(
+    files.map((file) => Object.freeze({ path: file.path, content: file.content })),
+  );
+}
+
+function captureHistorySnapshot(
+  files: readonly EditorFile[] = session.files,
+): EditorHistorySnapshot {
+  return Object.freeze({
+    activePath,
+    files: cloneEditorFiles(files),
+    scratchLayoutSource: session.kind === 'scratch' ? scratchLayoutSource() : null,
+  });
+}
+
+function historySnapshotsEqual(left: EditorHistorySnapshot, right: EditorHistorySnapshot): boolean {
+  if (
+    left.scratchLayoutSource !== right.scratchLayoutSource ||
+    left.files.length !== right.files.length
+  ) {
+    return false;
+  }
+  return left.files.every((file, index) => {
+    const other = right.files[index];
+    return other !== undefined && file.path === other.path && file.content === other.content;
+  });
+}
+
+function refreshHistoryControls(): void {
+  const history = editorHistory;
+  const blocked = persistenceBusy !== null;
+  undoButton.disabled = history === null || !history.canUndo || blocked;
+  redoButton.disabled = history === null || !history.canRedo || blocked;
+  undoButton.title =
+    history?.undoLabel === null || history?.undoLabel === undefined
+      ? 'Nothing to undo'
+      : `Undo ${history.undoLabel} (Ctrl/Cmd+Z)`;
+  redoButton.title =
+    history?.redoLabel === null || history?.redoLabel === undefined
+      ? 'Nothing to redo'
+      : `Redo ${history.redoLabel} (Ctrl/Cmd+Shift+Z)`;
+}
+
+function recordHistory(
+  label: string,
+  options: { readonly coalesceKey?: string; readonly timestampMs?: number } = {},
+): void {
+  const history = editorHistory;
+  if (history === null) return;
+  history.record(captureHistorySnapshot(), { label, ...options });
+  refreshHistoryControls();
+}
+
 function projectIsDirty(): boolean {
   const project = nativeProjectSession();
   return (
@@ -165,6 +230,7 @@ function projectIsDirty(): boolean {
 
 function refreshPersistenceState(): void {
   nativeProjectActions.hidden = nativeHost === null;
+  refreshHistoryControls();
   if (nativeHost === null) return;
 
   const project = nativeProjectSession();
@@ -197,6 +263,7 @@ function refreshPersistenceState(): void {
     project === null || !dirty || externalChangePaths.length > 0 || persistenceBusy !== null;
   reloadButton.disabled = project === null || persistenceBusy !== null;
   document.title = `${dirty ? '● ' : ''}Creator Studio · RPG Narrative Engine`;
+  refreshHistoryControls();
 }
 
 function confirmDiscardChanges(action: string): boolean {
@@ -230,6 +297,15 @@ function scratchLayoutSource(): string | null {
   }
 }
 
+function writeScratchLayoutSource(source: string | null): void {
+  try {
+    if (source === null) localStorage.removeItem(LAYOUT_STORAGE_KEY);
+    else localStorage.setItem(LAYOUT_STORAGE_KEY, source);
+  } catch {
+    throw new Error('The Story Map layout could not be stored in this browser.');
+  }
+}
+
 function editorMetadataFile(): EditorFile | undefined {
   return session.files.find((file) => file.path === EDITOR_METADATA_PATH);
 }
@@ -257,24 +333,24 @@ function storyMapLayout(): {
 function saveStoryMapLayout(
   positions: Readonly<Record<string, StoryMapPosition>>,
   replaceInvalid = false,
+  historyLabel = 'Update Story Map layout',
+  record = true,
 ): void {
   const source = serializeStoryMapLayout(replaceInvalid ? null : editorMetadataSource(), positions);
   if (session.kind === 'scratch') {
-    try {
-      localStorage.setItem(LAYOUT_STORAGE_KEY, source);
-    } catch {
-      throw new Error('The Story Map layout could not be stored in this browser.');
-    }
+    writeScratchLayoutSource(source);
+    if (record) recordHistory(historyLabel);
     return;
   }
   const current = editorMetadataFile();
   if (current === undefined) session.files.push({ path: EDITOR_METADATA_PATH, content: source });
   else current.content = source;
+  if (record) recordHistory(historyLabel);
   refreshPersistenceState();
 }
 
 function clearStoryMapLayout(): void {
-  saveStoryMapLayout(Object.freeze({}), true);
+  saveStoryMapLayout(Object.freeze({}), true, 'Reset Story Map layout');
 }
 
 function updateLifecycleLayout(
@@ -285,7 +361,7 @@ function updateLifecycleLayout(
   try {
     const positions = { ...layout.positions };
     mutator(positions);
-    saveStoryMapLayout(positions);
+    saveStoryMapLayout(positions, false, 'Update scene layout', false);
     return '';
   } catch (error) {
     return ` Layout metadata was not updated: ${error instanceof Error ? error.message : String(error)}`;
@@ -378,12 +454,13 @@ function activateFile(path: string, focus = false): void {
 }
 
 function updateStructuredFile(path: string, source: string): void {
-  updateStructuredFiles([{ path, source }], path);
+  updateStructuredFiles([{ path, source }], path, `Edit ${path}`);
 }
 
 function updateStructuredFiles(
   updates: readonly { readonly path: string; readonly source: string }[],
   preferredPath = activePath,
+  historyLabel: string | null = 'Edit project files',
 ): void {
   const files = updates.map((update) => {
     const file = session.files.find((candidate) => candidate.path === update.path);
@@ -398,6 +475,7 @@ function updateStructuredFiles(
   activePath = selected.path;
   sourceFile.value = selected.path;
   editor.value = selected.content;
+  if (historyLabel !== null) recordHistory(historyLabel);
   markBuildStale();
   updateStats();
 }
@@ -416,12 +494,14 @@ function renameProjectScene(from: string, to: string): string {
     const source = renameProjectEntryScene(manifest.content, from, to);
     if (source !== manifest.content) updates.push({ path: manifest.path, source });
   }
-  updateStructuredFiles(updates);
-  return updateLifecycleLayout((positions) => {
+  updateStructuredFiles(updates, activePath, null);
+  const warning = updateLifecycleLayout((positions) => {
     const current = positions[from];
     delete positions[from];
     if (current !== undefined) positions[to] = current;
   });
+  recordHistory(`Rename scene ${from} to ${to}`);
+  return warning;
 }
 
 function duplicateProjectScene(
@@ -436,11 +516,13 @@ function duplicateProjectScene(
       .map((file) => ({ path: file.path, source: file.content })),
     { from, to, targetPath, retargetSelfReferences },
   );
-  updateStructuredFiles(updates, targetPath);
-  return updateLifecycleLayout((positions) => {
+  updateStructuredFiles(updates, targetPath, null);
+  const warning = updateLifecycleLayout((positions) => {
     const current = positions[from];
     if (current !== undefined) positions[to] = { x: current.x + 36, y: current.y + 36 };
   });
+  recordHistory(`Duplicate scene ${from} as ${to}`);
+  return warning;
 }
 
 function deleteProjectScene(sceneId: string, replacementId: string): string {
@@ -460,10 +542,12 @@ function deleteProjectScene(sceneId: string, replacementId: string): string {
   const replacementPath = session.files.find(
     (file) => file.path.endsWith('.story') && storyFileDeclaresScene(file.content, replacementId),
   )?.path;
-  updateStructuredFiles(updates, replacementPath ?? activePath);
-  return updateLifecycleLayout((positions) => {
+  updateStructuredFiles(updates, replacementPath ?? activePath, null);
+  const warning = updateLifecycleLayout((positions) => {
     delete positions[sceneId];
   });
+  recordHistory(`Delete scene ${sceneId}`);
+  return warning;
 }
 
 function openAdvancedSource(path: string, from = 0, to = from): void {
@@ -473,6 +557,55 @@ function openAdvancedSource(path: string, from = 0, to = from): void {
   const end = Math.min(Math.max(start, to), editor.value.length);
   editor.focus();
   editor.setSelectionRange(start, end);
+}
+
+function restoreHistorySnapshot(
+  move: EditorHistoryMove<EditorHistorySnapshot>,
+  verb: string,
+): void {
+  const snapshot = move.state;
+  const currentPath = activePath;
+  if (session.kind === 'scratch') {
+    writeScratchLayoutSource(snapshot.scratchLayoutSource);
+    saveScratchSource(snapshot.files[0]?.content ?? '');
+  }
+  session.files.splice(
+    0,
+    session.files.length,
+    ...snapshot.files.map((file) => ({ path: file.path, content: file.content })),
+  );
+  const preferredPath = session.files.some((file) => file.path === currentPath)
+    ? currentPath
+    : session.files.some((file) => file.path === snapshot.activePath)
+      ? snapshot.activePath
+      : (session.files.find((file) => file.path.endsWith('.story'))?.path ??
+        session.files[0]?.path ??
+        '');
+  activePath = preferredPath;
+  refreshFileSelector();
+  activateFile(preferredPath);
+  markBuildStale();
+  runStory();
+  const message = `${verb} ${move.label}.`;
+  structuredEditorElements.status.textContent = message;
+  storyMapElements.status.textContent = message;
+  historyStatus.textContent = message;
+  refreshHistoryControls();
+}
+
+function moveThroughHistory(direction: 'redo' | 'undo'): void {
+  const history = editorHistory;
+  if (history === null || persistenceBusy !== null) return;
+  const move = direction === 'undo' ? history.undo() : history.redo();
+  if (move === null) return;
+  try {
+    restoreHistorySnapshot(move, direction === 'undo' ? 'Undid' : 'Redid');
+  } catch (error) {
+    if (direction === 'undo') history.redo();
+    else history.undo();
+    historyStatus.textContent = `Could not ${direction}: ${messageFor(error)}`;
+    refreshHistoryControls();
+  }
 }
 
 function setSession(next: EditorSession, preferredPath?: string): void {
@@ -490,6 +623,16 @@ function setSession(next: EditorSession, preferredPath?: string): void {
     preferredPath !== undefined && next.files.some((file) => file.path === preferredPath)
       ? preferredPath
       : (next.files[0]?.path ?? '');
+  const initialHistoryState = captureHistorySnapshot();
+  if (editorHistory === null) {
+    editorHistory = new EditorHistory(initialHistoryState, {
+      equals: historySnapshotsEqual,
+      initiallyClean: true,
+    });
+  } else {
+    editorHistory.reset(initialHistoryState, true);
+  }
+  historyStatus.textContent = '';
   refreshFileSelector();
   activateFile(activePath);
   refreshPersistenceState();
@@ -925,15 +1068,20 @@ async function openNativeProject(): Promise<void> {
 async function saveNativeProject(): Promise<void> {
   const project = nativeProjectSession();
   if (nativeHost === null || project === null || !projectIsDirty()) return;
+  const history = editorHistory;
+  const filesToSave = cloneEditorFiles(project.files);
+  const savingFingerprint = projectFingerprint(filesToSave);
+  const savingHistoryState = captureHistorySnapshot(filesToSave);
   persistenceBusy = 'Saving…';
   persistenceError = null;
   refreshPersistenceState();
   try {
-    const result = await nativeHost.saveProject(project.nativeSessionId!, project.files);
+    const result = await nativeHost.saveProject(project.nativeSessionId!, filesToSave);
     if (session !== project) return;
     externalChangePaths = result.changedPaths;
     if (result.changedPaths.length === 0) {
-      savedProjectFingerprint = projectFingerprint(project.files);
+      savedProjectFingerprint = savingFingerprint;
+      if (editorHistory === history) history?.markClean(savingHistoryState);
     }
   } catch (error) {
     if (session === project) persistenceError = messageFor(error);
@@ -1057,9 +1205,18 @@ storyMap = new StoryMapEditor(
 setAuthoringMode('visual');
 runStory();
 
-editor.addEventListener('input', () => {
+editor.addEventListener('input', (event) => {
   currentFile().content = editor.value;
   if (session.kind === 'scratch') saveScratchSource(editor.value);
+  const inputType = event instanceof InputEvent ? event.inputType : '';
+  if (/^(?:deleteContent|insertCompositionText|insertText)/u.test(inputType)) {
+    recordHistory(`Edit ${activePath}`, {
+      coalesceKey: `advanced-source:${activePath}`,
+      timestampMs: Date.now(),
+    });
+  } else {
+    recordHistory(`Edit ${activePath}`);
+  }
   markBuildStale();
   updateStats();
   structuredEditor.refresh();
@@ -1077,6 +1234,7 @@ editor.addEventListener('keydown', (event) => {
     editor.setRangeText('  ', start, end, 'end');
     currentFile().content = editor.value;
     if (session.kind === 'scratch') saveScratchSource(editor.value);
+    recordHistory(`Indent ${activePath}`);
     markBuildStale();
     updateStats();
     structuredEditor.refresh();
@@ -1097,6 +1255,8 @@ buildButton.addEventListener('click', openBuildDialog);
 startBuildButton.addEventListener('click', () => void startBuild());
 saveButton.addEventListener('click', () => void saveNativeProject());
 reloadButton.addEventListener('click', () => void reloadNativeProject());
+undoButton.addEventListener('click', () => moveThroughHistory('undo'));
+redoButton.addEventListener('click', () => moveThroughHistory('redo'));
 openButton.addEventListener('click', () => {
   if (confirmDiscardChanges('Open a story file')) fileInput.click();
 });
@@ -1157,7 +1317,20 @@ resetButton.addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key.toLowerCase() !== 's' || (!event.ctrlKey && !event.metaKey)) return;
+  if (event.defaultPrevented || (!event.ctrlKey && !event.metaKey) || event.altKey) return;
+  const key = event.key.toLowerCase();
+  const target = event.target;
+  const nativeTextUndo =
+    target !== editor &&
+    (target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      (target instanceof HTMLElement && target.isContentEditable));
+  if (!nativeTextUndo && (key === 'z' || (key === 'y' && !event.shiftKey))) {
+    event.preventDefault();
+    moveThroughHistory(key === 'y' || event.shiftKey ? 'redo' : 'undo');
+    return;
+  }
+  if (key !== 's') return;
   const project = nativeProjectSession();
   if (project === null) return;
   event.preventDefault();
