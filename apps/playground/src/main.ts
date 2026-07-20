@@ -146,11 +146,78 @@ let savedProjectFingerprint: string | null = null;
 let externalChangePaths: readonly string[] = [];
 let persistenceBusy: string | null = null;
 let persistenceError: string | null = null;
+let persistenceNotice: string | null = null;
 let checkingExternalChanges = false;
+let externalChangeCheckQueued = false;
+let externalChangeCheckTimer: number | null = null;
+let watchedNativeSessionId: string | null = null;
+let stopProjectWatcher: (() => void) | null = null;
+let watcherGeneration = 0;
 let editorHistory: EditorHistory<EditorHistorySnapshot> | null = null;
 
 function messageFor(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function resetQueuedExternalChangeCheck(): void {
+  externalChangeCheckQueued = false;
+  if (externalChangeCheckTimer !== null) {
+    window.clearTimeout(externalChangeCheckTimer);
+    externalChangeCheckTimer = null;
+  }
+}
+
+function queueExternalChangeCheck(delayMs = 150): void {
+  externalChangeCheckQueued = true;
+  if (persistenceBusy !== null || checkingExternalChanges) return;
+  if (externalChangeCheckTimer !== null) window.clearTimeout(externalChangeCheckTimer);
+  externalChangeCheckTimer = window.setTimeout(() => {
+    externalChangeCheckTimer = null;
+    void checkForExternalProjectChanges();
+  }, delayMs);
+}
+
+function resumeQueuedExternalChangeCheck(): void {
+  if (
+    externalChangeCheckQueued &&
+    externalChangeCheckTimer === null &&
+    persistenceBusy === null &&
+    !checkingExternalChanges
+  ) {
+    queueExternalChangeCheck();
+  }
+}
+
+function replaceProjectWatcher(nextSessionId: string | null): void {
+  if (watchedNativeSessionId === nextSessionId) return;
+  watcherGeneration += 1;
+  const generation = watcherGeneration;
+  resetQueuedExternalChangeCheck();
+  stopProjectWatcher?.();
+  stopProjectWatcher = null;
+
+  const previousSessionId = watchedNativeSessionId;
+  watchedNativeSessionId = nextSessionId;
+  if (nativeHost === null) return;
+  if (previousSessionId !== null) {
+    void nativeHost.closeProject(previousSessionId).catch(() => undefined);
+  }
+  if (nextSessionId === null) return;
+
+  void nativeHost
+    .onProjectFilesChanged(nextSessionId, () => queueExternalChangeCheck())
+    .then((stopWatching) => {
+      if (generation !== watcherGeneration || watchedNativeSessionId !== nextSessionId) {
+        stopWatching();
+        return;
+      }
+      stopProjectWatcher = stopWatching;
+    })
+    .catch((error: unknown) => {
+      if (generation !== watcherGeneration || watchedNativeSessionId !== nextSessionId) return;
+      persistenceError = `Could not watch this project for filesystem changes: ${messageFor(error)}`;
+      refreshPersistenceState();
+    });
 }
 
 function nativeProjectSession(): ProjectSession | null {
@@ -254,11 +321,18 @@ function refreshPersistenceState(): void {
     state = 'dirty';
     label = 'Unsaved changes';
     title = 'This project has changes that have not been written to disk.';
+  } else if (persistenceNotice !== null) {
+    state = 'recovered';
+    label = 'Save recovered';
+    title = persistenceNotice;
   }
 
   nativeProjectStatus.dataset['state'] = state;
   nativeProjectStatus.textContent = label;
   nativeProjectStatus.title = title;
+  projectButton.disabled = persistenceBusy !== null;
+  openButton.disabled = persistenceBusy !== null;
+  resetButton.disabled = persistenceBusy !== null;
   saveButton.disabled =
     project === null || !dirty || externalChangePaths.length > 0 || persistenceBusy !== null;
   reloadButton.disabled = project === null || persistenceBusy !== null;
@@ -608,15 +682,23 @@ function moveThroughHistory(direction: 'redo' | 'undo'): void {
   }
 }
 
-function setSession(next: EditorSession, preferredPath?: string): void {
+function setSession(
+  next: EditorSession,
+  preferredPath?: string,
+  recoveryNotice: string | null = null,
+): void {
   session = next;
   savedProjectFingerprint =
     next.kind === 'project' && next.nativeSessionId !== null
       ? projectFingerprint(next.files)
       : null;
   externalChangePaths = [];
-  persistenceBusy = null;
   persistenceError = null;
+  persistenceNotice = recoveryNotice;
+  resetQueuedExternalChangeCheck();
+  replaceProjectWatcher(
+    next.kind === 'project' && next.nativeSessionId !== null ? next.nativeSessionId : null,
+  );
   structuredEditorElements.status.textContent = '';
   storyMapElements.status.textContent = '';
   activePath =
@@ -1026,7 +1108,7 @@ async function openProjectSelection(fileList: FileList): Promise<void> {
 
 function openProjectFiles(
   files: readonly ProjectFileInput[],
-  nativeProject: Pick<NativeProject, 'rootName' | 'sessionId'> | null = null,
+  nativeProject: Pick<NativeProject, 'recoveryNotice' | 'rootName' | 'sessionId'> | null = null,
   preferredPath?: string,
 ): void {
   const project = loadNarrativeProject(files);
@@ -1044,30 +1126,48 @@ function openProjectFiles(
     preferredPath !== undefined && project.files.some((file) => file.path === preferredPath)
       ? preferredPath
       : (entryFile?.path ?? project.storyFiles[0]?.path ?? 'project.toml');
-  setSession(next, selectedPath);
+  setSession(next, selectedPath, nativeProject?.recoveryNotice ?? null);
   runStory();
 }
 
 async function openNativeProject(): Promise<void> {
-  if (nativeHost === null || !confirmDiscardChanges('Open another project')) return;
+  if (
+    nativeHost === null ||
+    persistenceBusy !== null ||
+    !confirmDiscardChanges('Open another project')
+  ) {
+    return;
+  }
   persistenceBusy = 'Opening project…';
   persistenceError = null;
   refreshPersistenceState();
   try {
     const opened = await nativeHost.openProject();
-    if (opened !== null) openProjectFiles(opened.files, opened);
+    if (opened !== null) {
+      try {
+        openProjectFiles(opened.files, opened);
+      } catch (error) {
+        if (nativeProjectSession()?.nativeSessionId !== opened.sessionId) {
+          await nativeHost.closeProject(opened.sessionId).catch(() => undefined);
+        }
+        throw error;
+      }
+    }
   } catch (error) {
     persistenceError = messageFor(error);
     showOpenProjectError(error);
   } finally {
     persistenceBusy = null;
     refreshPersistenceState();
+    resumeQueuedExternalChangeCheck();
   }
 }
 
 async function saveNativeProject(): Promise<void> {
   const project = nativeProjectSession();
-  if (nativeHost === null || project === null || !projectIsDirty()) return;
+  if (nativeHost === null || project === null || persistenceBusy !== null || !projectIsDirty()) {
+    return;
+  }
   const history = editorHistory;
   const filesToSave = cloneEditorFiles(project.files);
   const savingFingerprint = projectFingerprint(filesToSave);
@@ -1079,6 +1179,7 @@ async function saveNativeProject(): Promise<void> {
     const result = await nativeHost.saveProject(project.nativeSessionId!, filesToSave);
     if (session !== project) return;
     externalChangePaths = result.changedPaths;
+    persistenceNotice = result.recoveryNotice;
     if (result.changedPaths.length === 0) {
       savedProjectFingerprint = savingFingerprint;
       if (editorHistory === history) history?.markClean(savingHistoryState);
@@ -1088,6 +1189,7 @@ async function saveNativeProject(): Promise<void> {
   } finally {
     persistenceBusy = null;
     refreshPersistenceState();
+    resumeQueuedExternalChangeCheck();
   }
 }
 
@@ -1096,6 +1198,7 @@ async function reloadNativeProject(): Promise<void> {
   if (
     nativeHost === null ||
     project === null ||
+    persistenceBusy !== null ||
     !confirmDiscardChanges('Reload the files from disk')
   ) {
     return;
@@ -1111,24 +1214,27 @@ async function reloadNativeProject(): Promise<void> {
   } finally {
     persistenceBusy = null;
     refreshPersistenceState();
+    resumeQueuedExternalChangeCheck();
   }
 }
 
 async function checkForExternalProjectChanges(): Promise<void> {
   const project = nativeProjectSession();
-  if (
-    nativeHost === null ||
-    project === null ||
-    checkingExternalChanges ||
-    persistenceBusy !== null
-  ) {
+  if (nativeHost === null || project === null) {
+    externalChangeCheckQueued = false;
     return;
   }
+  if (checkingExternalChanges || persistenceBusy !== null) {
+    externalChangeCheckQueued = true;
+    return;
+  }
+  externalChangeCheckQueued = false;
   checkingExternalChanges = true;
   try {
-    const changedPaths = await nativeHost.checkProjectChanges(project.nativeSessionId!);
+    const result = await nativeHost.checkProjectChanges(project.nativeSessionId!);
     if (session === project) {
-      externalChangePaths = changedPaths;
+      externalChangePaths = result.changedPaths;
+      if (result.recoveryNotice !== null) persistenceNotice = result.recoveryNotice;
       persistenceError = null;
     }
   } catch (error) {
@@ -1136,6 +1242,7 @@ async function checkForExternalProjectChanges(): Promise<void> {
   } finally {
     checkingExternalChanges = false;
     refreshPersistenceState();
+    resumeQueuedExternalChangeCheck();
   }
 }
 
@@ -1337,7 +1444,7 @@ document.addEventListener('keydown', (event) => {
   void saveNativeProject();
 });
 
-window.addEventListener('focus', () => void checkForExternalProjectChanges());
+window.addEventListener('focus', () => queueExternalChangeCheck(0));
 window.addEventListener('beforeunload', (event) => {
   if (!projectIsDirty()) return;
   event.preventDefault();

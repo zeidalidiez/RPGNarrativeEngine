@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -13,11 +14,18 @@ use std::{
     thread,
     time::Duration,
 };
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 const EDITOR_METADATA_PATH: &str = ".rpgne/editor.json";
+const PROJECT_FILES_CHANGED_EVENT: &str = "rpgne-project-files-changed";
+const SAVE_JOURNAL_PATH: &str = ".rpgne/save-transaction.json";
+const SAVE_JOURNAL_PREPARE_PATH: &str = ".rpgne/save-transaction.preparing";
+const SAVE_COMMIT_PATH: &str = ".rpgne/save-commit";
+const SAVE_COMMIT_PREPARE_PATH: &str = ".rpgne/save-commit.preparing";
+const SAVE_JOURNAL_SCHEMA: u32 = 1;
+const MAX_SAVE_JOURNAL_BYTES: u64 = 8 * 1024 * 1024;
 const STAGING_MARKER: &str = ".rpgne-staging.json";
 const MAX_PROJECT_FILES: usize = 4_096;
 const MAX_PROJECT_ENTRIES: usize = 100_000;
@@ -39,6 +47,7 @@ struct ProjectSession {
     writable_paths: BTreeSet<String>,
     last_output: Option<PathBuf>,
     operation: Arc<Mutex<()>>,
+    _watcher: RecommendedWatcher,
 }
 
 struct ProjectSnapshot {
@@ -60,6 +69,7 @@ pub struct OpenedProject {
     session_id: String,
     root_name: String,
     files: Vec<ProjectFile>,
+    recovery_notice: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -80,12 +90,14 @@ pub struct SaveProjectRequest {
 pub struct SaveProjectResult {
     saved_files: usize,
     changed_paths: Vec<String>,
+    recovery_notice: Option<String>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeCheckResult {
     changed_paths: Vec<String>,
+    recovery_notice: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -118,11 +130,32 @@ struct SessionAccess {
 }
 
 struct SaveStage {
+    relative_path: String,
     target: PathBuf,
     temporary: PathBuf,
     backup: PathBuf,
-    backed_up: bool,
-    installed: bool,
+    had_original: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SaveJournal {
+    schema: u32,
+    operation_id: u64,
+    files: Vec<SaveJournalFile>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SaveJournalFile {
+    path: String,
+    had_original: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectFilesChanged {
+    session_id: String,
 }
 
 struct DecodedBuildFile {
@@ -158,6 +191,15 @@ fn session_access(state: &ProjectState, session_id: &str) -> Result<SessionAcces
     })
 }
 
+fn operation_for_root(state: &ProjectState, root: &Path) -> Result<Arc<Mutex<()>>, String> {
+    let sessions = state_lock(state)?;
+    Ok(sessions
+        .values()
+        .find(|session| session.root == root)
+        .map(|session| Arc::clone(&session.operation))
+        .unwrap_or_else(|| Arc::new(Mutex::new(()))))
+}
+
 fn root_name(root: &Path) -> String {
     root.file_name()
         .and_then(|name| name.to_str())
@@ -166,11 +208,79 @@ fn root_name(root: &Path) -> String {
         .to_string()
 }
 
-fn opened_project(session_id: String, root: &Path, snapshot: ProjectSnapshot) -> OpenedProject {
+fn watch_path_is_relevant(root: &Path, path: &Path, kind: &EventKind) -> bool {
+    if matches!(kind, EventKind::Access(_)) {
+        return false;
+    }
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    if relative.as_os_str().is_empty() {
+        return true;
+    }
+    let normalized = relative.to_string_lossy().replace('\\', "/");
+    if normalized == "project.toml" || normalized == EDITOR_METADATA_PATH {
+        return true;
+    }
+    let component_names = relative
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    let Some(first) = component_names.first() else {
+        return false;
+    };
+    if *first == ".rpgne" || should_skip_story_directory(first) {
+        return false;
+    }
+    if component_names
+        .iter()
+        .any(|name| name.contains(".rpgne-save-") || name.contains(".rpgne-previous-"))
+    {
+        return false;
+    }
+    normalized.ends_with(".story") || path.is_dir() || !path.exists()
+}
+
+fn create_project_watcher(
+    app: &AppHandle,
+    root: &Path,
+    session_id: &str,
+) -> Result<RecommendedWatcher, String> {
+    let watched_root = root.to_path_buf();
+    let event_app = app.clone();
+    let payload = ProjectFilesChanged {
+        session_id: session_id.to_string(),
+    };
+    let mut watcher = notify::recommended_watcher(move |result: notify::Result<Event>| {
+        let relevant = match result {
+            Ok(event) => event
+                .paths
+                .iter()
+                .any(|path| watch_path_is_relevant(&watched_root, path, &event.kind)),
+            Err(_) => true,
+        };
+        if relevant {
+            let _ = event_app.emit(PROJECT_FILES_CHANGED_EVENT, payload.clone());
+        }
+    })
+    .map_err(|error| format!("Could not create the project filesystem watcher: {error}"))?;
+    watcher
+        .watch(root, RecursiveMode::Recursive)
+        .map_err(|error| format!("Could not watch {}: {error}", root.display()))?;
+    Ok(watcher)
+}
+
+fn opened_project(
+    session_id: String,
+    root: &Path,
+    snapshot: ProjectSnapshot,
+    recovery_notice: Option<String>,
+) -> OpenedProject {
     OpenedProject {
         session_id,
         root_name: root_name(root),
         files: snapshot.files,
+        recovery_notice,
     }
 }
 
@@ -429,19 +539,425 @@ fn rename_with_retry(source: &Path, destination: &Path) -> Result<(), String> {
     unreachable!()
 }
 
-fn rollback_save(stages: &mut [SaveStage]) {
-    for stage in stages.iter_mut().rev() {
-        if stage.installed {
-            let _ = fs::remove_file(&stage.target);
-            stage.installed = false;
+fn remove_file_with_retry(path: &Path) -> Result<(), String> {
+    let delays = [25_u64, 50, 100, 200, 400, 800, 1_600];
+    for (attempt, delay) in delays.iter().chain(std::iter::once(&0)).enumerate() {
+        match fs::remove_file(path) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                let transient = matches!(
+                    error.kind(),
+                    std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::WouldBlock
+                ) || matches!(error.raw_os_error(), Some(5 | 32 | 33));
+                if attempt >= delays.len() || !transient {
+                    return Err(format!("Could not remove {}: {error}", path.display()));
+                }
+                thread::sleep(Duration::from_millis(*delay));
+            }
         }
-        if stage.backed_up && stage.backup.exists() {
-            let _ = rename_with_retry(&stage.backup, &stage.target);
-            stage.backed_up = false;
+    }
+    unreachable!()
+}
+
+fn ordinary_file_exists(path: &Path, label: &str) -> Result<bool, String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => Err(format!(
+            "{label} {} must be an ordinary file.",
+            path.display()
+        )),
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("Could not inspect {}: {error}", path.display())),
+    }
+}
+
+fn ensure_transaction_directory(root: &Path) -> Result<PathBuf, String> {
+    reject_symlink_components(root, ".rpgne", "Transaction directory")?;
+    let directory = root.join(".rpgne");
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("Could not create {}: {error}", directory.display()))?;
+    let metadata = fs::symlink_metadata(&directory)
+        .map_err(|error| format!("Could not inspect {}: {error}", directory.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(format!(
+            "Transaction directory {} must be an ordinary directory.",
+            directory.display()
+        ));
+    }
+    Ok(directory)
+}
+
+#[cfg(not(windows))]
+fn sync_directory(path: &Path) -> Result<(), String> {
+    fs::File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| format!("Could not flush directory {}: {error}", path.display()))
+}
+
+#[cfg(windows)]
+fn sync_directory(_path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
+fn sync_stage_parents(stages: &[SaveStage]) -> Result<(), String> {
+    let parents = stages
+        .iter()
+        .filter_map(|stage| stage.target.parent().map(Path::to_path_buf))
+        .collect::<BTreeSet<_>>();
+    for parent in parents {
+        sync_directory(&parent)?;
+    }
+    Ok(())
+}
+
+fn transaction_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
+    reject_symlink_components(root, relative_path, "Save transaction file")?;
+    resolved_child(root, relative_path, "Save transaction file")
+}
+
+fn remove_transaction_file(root: &Path, relative_path: &str) -> Result<(), String> {
+    let path = transaction_path(root, relative_path)?;
+    if ordinary_file_exists(&path, "Save transaction file")? {
+        remove_file_with_retry(&path)?;
+    }
+    Ok(())
+}
+
+fn prepare_save_stages(
+    root: &Path,
+    files: &[ProjectFile],
+    operation_id: u64,
+) -> Result<Vec<SaveStage>, String> {
+    ensure_transaction_directory(root)?;
+    let mut stages = Vec::with_capacity(files.len());
+    for file in files {
+        reject_symlink_components(root, &file.path, "Project file")?;
+        let target = resolved_child(root, &file.path, "Project file")?;
+        let parent = target
+            .parent()
+            .ok_or_else(|| format!("{} has no parent directory.", target.display()))?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
+        reject_symlink_components(root, &file.path, "Project file")?;
+        let had_original = ordinary_file_exists(&target, "Project file")?;
+        let temporary = sibling_transaction_path(&target, "save", operation_id)?;
+        let backup = sibling_transaction_path(&target, "previous", operation_id)?;
+        if path_exists(&temporary)? || path_exists(&backup)? {
+            return Err(format!(
+                "Save transaction files already exist beside {}.",
+                target.display()
+            ));
         }
-        if stage.temporary.exists() {
-            let _ = fs::remove_file(&stage.temporary);
+        stages.push(SaveStage {
+            relative_path: file.path.clone(),
+            target,
+            temporary,
+            backup,
+            had_original,
+        });
+    }
+    Ok(stages)
+}
+
+fn journal_for_stages(operation_id: u64, stages: &[SaveStage]) -> SaveJournal {
+    SaveJournal {
+        schema: SAVE_JOURNAL_SCHEMA,
+        operation_id,
+        files: stages
+            .iter()
+            .map(|stage| SaveJournalFile {
+                path: stage.relative_path.clone(),
+                had_original: stage.had_original,
+            })
+            .collect(),
+    }
+}
+
+fn write_transaction_record(
+    root: &Path,
+    preparing_path: &str,
+    final_path: &str,
+    content: &[u8],
+) -> Result<(), String> {
+    let directory = ensure_transaction_directory(root)?;
+    let preparing = transaction_path(root, preparing_path)?;
+    let final_record = transaction_path(root, final_path)?;
+    if path_exists(&preparing)? || path_exists(&final_record)? {
+        return Err(format!(
+            "A save transaction record already exists in {}.",
+            directory.display()
+        ));
+    }
+    write_synced_new(&preparing, content)?;
+    rename_with_retry(&preparing, &final_record)?;
+    sync_directory(&directory)
+}
+
+fn write_save_journal(root: &Path, journal: &SaveJournal) -> Result<(), String> {
+    let encoded = serde_json::to_vec(journal)
+        .map_err(|error| format!("Could not encode the save transaction journal: {error}"))?;
+    if encoded.len() as u64 > MAX_SAVE_JOURNAL_BYTES {
+        return Err("The save transaction journal exceeds its safety limit.".to_string());
+    }
+    write_transaction_record(root, SAVE_JOURNAL_PREPARE_PATH, SAVE_JOURNAL_PATH, &encoded)
+}
+
+fn write_commit_marker(root: &Path, operation_id: u64) -> Result<(), String> {
+    write_transaction_record(
+        root,
+        SAVE_COMMIT_PREPARE_PATH,
+        SAVE_COMMIT_PATH,
+        operation_id.to_string().as_bytes(),
+    )
+}
+
+fn read_save_journal(root: &Path) -> Result<Option<SaveJournal>, String> {
+    let path = transaction_path(root, SAVE_JOURNAL_PATH)?;
+    if !ordinary_file_exists(&path, "Save transaction journal")? {
+        return Ok(None);
+    }
+    let metadata = fs::metadata(&path)
+        .map_err(|error| format!("Could not inspect {}: {error}", path.display()))?;
+    if metadata.len() > MAX_SAVE_JOURNAL_BYTES {
+        return Err(format!(
+            "Save transaction journal {} exceeds its safety limit.",
+            path.display()
+        ));
+    }
+    let encoded =
+        fs::read(&path).map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    let journal: SaveJournal = serde_json::from_slice(&encoded).map_err(|error| {
+        format!(
+            "Save transaction journal {} is invalid: {error}",
+            path.display()
+        )
+    })?;
+    if journal.schema != SAVE_JOURNAL_SCHEMA || journal.operation_id == 0 {
+        return Err(format!(
+            "Save transaction journal {} uses an unsupported schema or operation id.",
+            path.display()
+        ));
+    }
+    if journal.files.is_empty() || journal.files.len() > MAX_PROJECT_FILES + 2 {
+        return Err(format!(
+            "Save transaction journal {} contains an invalid file count.",
+            path.display()
+        ));
+    }
+    let mut paths = BTreeSet::new();
+    for file in &journal.files {
+        validate_relative_path(&file.path, "Save transaction path")?;
+        if file.path != "project.toml"
+            && file.path != EDITOR_METADATA_PATH
+            && !file.path.ends_with(".story")
+        {
+            return Err(format!(
+                "Save transaction path {} is not an editable project source.",
+                file.path
+            ));
         }
+        if !paths.insert(file.path.clone()) {
+            return Err(format!(
+                "Save transaction journal contains duplicate path {}.",
+                file.path
+            ));
+        }
+    }
+    Ok(Some(journal))
+}
+
+fn stages_from_journal(root: &Path, journal: &SaveJournal) -> Result<Vec<SaveStage>, String> {
+    journal
+        .files
+        .iter()
+        .map(|file| {
+            reject_symlink_components(root, &file.path, "Save transaction path")?;
+            let target = resolved_child(root, &file.path, "Save transaction path")?;
+            Ok(SaveStage {
+                relative_path: file.path.clone(),
+                temporary: sibling_transaction_path(&target, "save", journal.operation_id)?,
+                backup: sibling_transaction_path(&target, "previous", journal.operation_id)?,
+                target,
+                had_original: file.had_original,
+            })
+        })
+        .collect()
+}
+
+fn commit_marker_exists(root: &Path, operation_id: u64) -> Result<bool, String> {
+    let path = transaction_path(root, SAVE_COMMIT_PATH)?;
+    if !ordinary_file_exists(&path, "Save commit marker")? {
+        return Ok(false);
+    }
+    let encoded =
+        fs::read(&path).map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    let marker = std::str::from_utf8(&encoded)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok());
+    if marker != Some(operation_id) {
+        return Err(format!(
+            "Save commit marker {} does not match transaction {}.",
+            path.display(),
+            operation_id
+        ));
+    }
+    Ok(true)
+}
+
+fn validate_rollback_state(stages: &[SaveStage]) -> Result<(), String> {
+    for stage in stages {
+        let target_exists = ordinary_file_exists(&stage.target, "Project file")?;
+        let temporary_exists = ordinary_file_exists(&stage.temporary, "Staged project file")?;
+        let backup_exists = ordinary_file_exists(&stage.backup, "Project backup")?;
+        if backup_exists && !stage.had_original {
+            return Err(format!(
+                "Unexpected backup exists for newly created file {}.",
+                stage.relative_path
+            ));
+        }
+        if backup_exists && target_exists {
+            return Err(format!(
+                "Both the project file and its backup exist for {}; refusing to overwrite either.",
+                stage.relative_path
+            ));
+        }
+        if stage.had_original && !backup_exists && !target_exists {
+            return Err(format!(
+                "Neither the original nor backup exists for {}.",
+                stage.relative_path
+            ));
+        }
+        let _ = temporary_exists;
+    }
+    Ok(())
+}
+
+fn rollback_prepared_save(root: &Path, stages: &[SaveStage]) -> Result<(), String> {
+    validate_rollback_state(stages)?;
+    for stage in stages.iter().rev() {
+        if ordinary_file_exists(&stage.temporary, "Staged project file")? {
+            remove_file_with_retry(&stage.temporary)?;
+        }
+        if ordinary_file_exists(&stage.backup, "Project backup")? {
+            rename_with_retry(&stage.backup, &stage.target)?;
+        }
+    }
+    sync_stage_parents(stages)?;
+    remove_transaction_file(root, SAVE_COMMIT_PREPARE_PATH)?;
+    remove_transaction_file(root, SAVE_JOURNAL_PATH)?;
+    remove_transaction_file(root, SAVE_JOURNAL_PREPARE_PATH)?;
+    sync_directory(&root.join(".rpgne"))
+}
+
+fn validate_forward_state(stages: &[SaveStage]) -> Result<(), String> {
+    for stage in stages {
+        let target_exists = ordinary_file_exists(&stage.target, "Project file")?;
+        let temporary_exists = ordinary_file_exists(&stage.temporary, "Staged project file")?;
+        let backup_exists = ordinary_file_exists(&stage.backup, "Project backup")?;
+        if backup_exists && !stage.had_original {
+            return Err(format!(
+                "Unexpected backup exists for newly created file {}.",
+                stage.relative_path
+            ));
+        }
+        if target_exists && temporary_exists {
+            return Err(format!(
+                "Both the installed and staged versions exist for {}; refusing to choose one.",
+                stage.relative_path
+            ));
+        }
+        if !target_exists && !temporary_exists {
+            return Err(format!(
+                "Neither the installed nor staged version exists for {}.",
+                stage.relative_path
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn complete_committed_save(root: &Path, stages: &[SaveStage]) -> Result<(), String> {
+    validate_forward_state(stages)?;
+    for stage in stages {
+        if ordinary_file_exists(&stage.temporary, "Staged project file")? {
+            rename_with_retry(&stage.temporary, &stage.target)?;
+        }
+    }
+    sync_stage_parents(stages)?;
+    for stage in stages {
+        if ordinary_file_exists(&stage.backup, "Project backup")? {
+            remove_file_with_retry(&stage.backup)?;
+        }
+    }
+    sync_stage_parents(stages)?;
+    remove_transaction_file(root, SAVE_JOURNAL_PATH)?;
+    sync_directory(&root.join(".rpgne"))?;
+    remove_transaction_file(root, SAVE_COMMIT_PATH)?;
+    remove_transaction_file(root, SAVE_COMMIT_PREPARE_PATH)?;
+    remove_transaction_file(root, SAVE_JOURNAL_PREPARE_PATH)?;
+    sync_directory(&root.join(".rpgne"))
+}
+
+fn recover_interrupted_save(root: &Path) -> Result<Option<String>, String> {
+    let transaction_directory = root.join(".rpgne");
+    let directory_metadata = match fs::symlink_metadata(&transaction_directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "Could not inspect {}: {error}",
+                transaction_directory.display()
+            ));
+        }
+    };
+    if directory_metadata.file_type().is_symlink() || !directory_metadata.is_dir() {
+        return Err(format!(
+            "Transaction directory {} must be an ordinary directory.",
+            transaction_directory.display()
+        ));
+    }
+    let journal_preparing = transaction_path(root, SAVE_JOURNAL_PREPARE_PATH)?;
+    let journal = read_save_journal(root)?;
+    if journal.is_some() && ordinary_file_exists(&journal_preparing, "Preparing save journal")? {
+        return Err(
+            "Both active and preparing save journals exist; refusing ambiguous recovery."
+                .to_string(),
+        );
+    }
+    let Some(journal) = journal else {
+        remove_transaction_file(root, SAVE_JOURNAL_PREPARE_PATH)?;
+        remove_transaction_file(root, SAVE_COMMIT_PREPARE_PATH)?;
+        let commit = transaction_path(root, SAVE_COMMIT_PATH)?;
+        if ordinary_file_exists(&commit, "Save commit marker")? {
+            remove_file_with_retry(&commit)?;
+            sync_directory(&root.join(".rpgne"))?;
+            return Ok(Some(
+                "Recovered an interrupted project save by completing it.".to_string(),
+            ));
+        }
+        return Ok(None);
+    };
+
+    let committed = commit_marker_exists(root, journal.operation_id)?;
+    let commit_preparing = transaction_path(root, SAVE_COMMIT_PREPARE_PATH)?;
+    if committed && ordinary_file_exists(&commit_preparing, "Preparing commit marker")? {
+        return Err(
+            "Both active and preparing save commit markers exist; refusing ambiguous recovery."
+                .to_string(),
+        );
+    }
+    let stages = stages_from_journal(root, &journal)?;
+    if committed {
+        complete_committed_save(root, &stages)?;
+        Ok(Some(
+            "Recovered an interrupted project save by completing it.".to_string(),
+        ))
+    } else {
+        rollback_prepared_save(root, &stages)?;
+        Ok(Some(
+            "Recovered an interrupted project save by rolling it back.".to_string(),
+        ))
     }
 }
 
@@ -449,62 +965,41 @@ fn atomically_replace_project_files(
     root: &Path,
     files: &[ProjectFile],
     operation_id: u64,
-) -> Result<(), String> {
-    let mut stages = Vec::with_capacity(files.len());
-    for file in files {
-        let staged = (|| {
-            reject_symlink_components(root, &file.path, "Project file")?;
-            let target = resolved_child(root, &file.path, "Project file")?;
-            let parent = target
-                .parent()
-                .ok_or_else(|| format!("{} has no parent directory.", target.display()))?;
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
-            let temporary = sibling_transaction_path(&target, "save", operation_id)?;
-            let backup = sibling_transaction_path(&target, "previous", operation_id)?;
-            if let Err(error) = write_synced_new(&temporary, file.content.as_bytes()) {
-                let _ = fs::remove_file(&temporary);
-                return Err(error);
-            }
-            Ok(SaveStage {
-                target,
-                temporary,
-                backup,
-                backed_up: false,
-                installed: false,
-            })
-        })();
-        match staged {
-            Ok(stage) => stages.push(stage),
-            Err(error) => {
-                rollback_save(&mut stages);
-                return Err(error);
+) -> Result<Option<String>, String> {
+    let stages = prepare_save_stages(root, files, operation_id)?;
+    let journal = journal_for_stages(operation_id, &stages);
+    let mut committed = false;
+    let result = (|| {
+        write_save_journal(root, &journal)?;
+        for (file, stage) in files.iter().zip(&stages) {
+            write_synced_new(&stage.temporary, file.content.as_bytes())?;
+        }
+        sync_stage_parents(&stages)?;
+        for stage in &stages {
+            if stage.had_original {
+                rename_with_retry(&stage.target, &stage.backup)?;
             }
         }
-    }
+        sync_stage_parents(&stages)?;
+        write_commit_marker(root, operation_id)?;
+        committed = true;
+        complete_committed_save(root, &stages)
+    })();
 
-    for index in 0..stages.len() {
-        if stages[index].target.exists() {
-            if let Err(error) = rename_with_retry(&stages[index].target, &stages[index].backup) {
-                rollback_save(&mut stages);
-                return Err(error);
+    match result {
+        Ok(()) => Ok(None),
+        Err(save_error) => {
+            let marker_committed =
+                committed || commit_marker_exists(root, operation_id).unwrap_or(false);
+            match recover_interrupted_save(root) {
+                Ok(notice) if marker_committed => Ok(notice),
+                Ok(_) => Err(save_error),
+                Err(recovery_error) => Err(format!(
+                    "{save_error} Automatic save recovery also failed: {recovery_error}"
+                )),
             }
-            stages[index].backed_up = true;
         }
     }
-    for index in 0..stages.len() {
-        if let Err(error) = rename_with_retry(&stages[index].temporary, &stages[index].target) {
-            rollback_save(&mut stages);
-            return Err(error);
-        }
-        stages[index].installed = true;
-    }
-    for stage in &stages {
-        if stage.backed_up {
-            let _ = fs::remove_file(&stage.backup);
-        }
-    }
-    Ok(())
 }
 
 fn validate_save_files(
@@ -826,11 +1321,15 @@ pub async fn open_project(
         .map_err(|_| "The selected folder is not a local filesystem path.".to_string())?;
     let root = fs::canonicalize(&selected_path)
         .map_err(|error| format!("Could not open {}: {error}", selected_path.display()))?;
+    let operation = operation_for_root(&state, &root)?;
+    let _operation = operation_lock(&operation)?;
+    let recovery_notice = recover_interrupted_save(&root)?;
     let snapshot = read_project(&root)?;
     let session_id = format!(
         "project-{}",
         state.next_session.fetch_add(1, Ordering::Relaxed) + 1
     );
+    let watcher = create_project_watcher(&app, &root, &session_id)?;
     state_lock(&state)?.insert(
         session_id.clone(),
         ProjectSession {
@@ -838,10 +1337,25 @@ pub async fn open_project(
             revisions: snapshot.revisions.clone(),
             writable_paths: snapshot.writable_paths.clone(),
             last_output: None,
-            operation: Arc::new(Mutex::new(())),
+            operation: Arc::clone(&operation),
+            _watcher: watcher,
         },
     );
-    Ok(Some(opened_project(session_id, &root, snapshot)))
+    Ok(Some(opened_project(
+        session_id,
+        &root,
+        snapshot,
+        recovery_notice,
+    )))
+}
+
+#[tauri::command]
+pub fn close_project(
+    state: State<'_, ProjectState>,
+    request: SessionRequest,
+) -> Result<(), String> {
+    state_lock(&state)?.remove(&request.session_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -851,6 +1365,7 @@ pub fn reload_project(
 ) -> Result<OpenedProject, String> {
     let access = session_access(&state, &request.session_id)?;
     let _operation = operation_lock(&access.operation)?;
+    let recovery_notice = recover_interrupted_save(&access.root)?;
     let snapshot = read_project(&access.root)?;
     {
         let mut sessions = state_lock(&state)?;
@@ -860,7 +1375,12 @@ pub fn reload_project(
         session.revisions = snapshot.revisions.clone();
         session.writable_paths = snapshot.writable_paths.clone();
     }
-    Ok(opened_project(request.session_id, &access.root, snapshot))
+    Ok(opened_project(
+        request.session_id,
+        &access.root,
+        snapshot,
+        recovery_notice,
+    ))
 }
 
 #[tauri::command]
@@ -870,9 +1390,11 @@ pub fn check_project_changes(
 ) -> Result<ChangeCheckResult, String> {
     let access = session_access(&state, &request.session_id)?;
     let _operation = operation_lock(&access.operation)?;
+    let recovery_notice = recover_interrupted_save(&access.root)?;
     let snapshot = read_project(&access.root)?;
     Ok(ChangeCheckResult {
         changed_paths: changed_paths(&access.revisions, &snapshot.revisions),
+        recovery_notice,
     })
 }
 
@@ -883,6 +1405,7 @@ pub fn save_project(
 ) -> Result<SaveProjectResult, String> {
     let access = session_access(&state, &request.session_id)?;
     let _operation = operation_lock(&access.operation)?;
+    let recovery_notice = recover_interrupted_save(&access.root)?;
     validate_save_files(&request.files, &access.writable_paths)?;
     let current = read_project(&access.root)?;
     let external_changes = changed_paths(&access.revisions, &current.revisions);
@@ -890,11 +1413,13 @@ pub fn save_project(
         return Ok(SaveProjectResult {
             saved_files: 0,
             changed_paths: external_changes,
+            recovery_notice,
         });
     }
 
     let operation_id = state.next_operation.fetch_add(1, Ordering::Relaxed) + 1;
-    atomically_replace_project_files(&access.root, &request.files, operation_id)?;
+    let save_recovery_notice =
+        atomically_replace_project_files(&access.root, &request.files, operation_id)?;
     let saved = read_project(&access.root)?;
     {
         let mut sessions = state_lock(&state)?;
@@ -907,6 +1432,7 @@ pub fn save_project(
     Ok(SaveProjectResult {
         saved_files: request.files.len(),
         changed_paths: Vec::new(),
+        recovery_notice: save_recovery_notice.or(recovery_notice),
     })
 }
 
@@ -957,4 +1483,124 @@ pub fn open_project_output(
     app.opener()
         .open_path(output.to_string_lossy().into_owned(), None::<&str>)
         .map_err(|error| format!("Could not open the build folder: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
+
+    struct TestProject {
+        root: PathBuf,
+    }
+
+    impl TestProject {
+        fn create(label: &str) -> Self {
+            let id = NEXT_TEST_PROJECT.fetch_add(1, Ordering::Relaxed);
+            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("target")
+                .join("recovery-tests")
+                .join(format!("{label}-{}-{id}", std::process::id()));
+            fs::create_dir_all(root.join("scenes")).expect("create recovery test project");
+            fs::write(
+                root.join("project.toml"),
+                "[project]\nid = \"test\"\ntitle = \"Before\"\n",
+            )
+            .expect("write test manifest");
+            fs::write(root.join("scenes").join("main.story"), "scene before\n")
+                .expect("write test story");
+            Self { root }
+        }
+
+        fn replacement_files() -> Vec<ProjectFile> {
+            vec![
+                ProjectFile {
+                    path: "project.toml".to_string(),
+                    content: "[project]\nid = \"test\"\ntitle = \"After\"\n".to_string(),
+                },
+                ProjectFile {
+                    path: "scenes/main.story".to_string(),
+                    content: "scene after\n".to_string(),
+                },
+            ]
+        }
+    }
+
+    impl Drop for TestProject {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn prepare_interrupted_transaction(
+        project: &TestProject,
+        operation_id: u64,
+    ) -> (Vec<ProjectFile>, Vec<SaveStage>) {
+        let files = TestProject::replacement_files();
+        let stages =
+            prepare_save_stages(&project.root, &files, operation_id).expect("prepare save stages");
+        write_save_journal(&project.root, &journal_for_stages(operation_id, &stages))
+            .expect("write save journal");
+        for (file, stage) in files.iter().zip(&stages) {
+            write_synced_new(&stage.temporary, file.content.as_bytes())
+                .expect("write staged source");
+        }
+        for stage in &stages {
+            rename_with_retry(&stage.target, &stage.backup).expect("back up original source");
+        }
+        (files, stages)
+    }
+
+    #[test]
+    fn recovery_rolls_back_a_prepared_save_without_a_commit_marker() {
+        let project = TestProject::create("rollback");
+        let (_files, stages) = prepare_interrupted_transaction(&project, 4_101);
+
+        let notice = recover_interrupted_save(&project.root)
+            .expect("recover prepared save")
+            .expect("report recovery");
+
+        assert!(notice.contains("rolling it back"));
+        assert!(fs::read_to_string(project.root.join("project.toml"))
+            .expect("read restored manifest")
+            .contains("Before"));
+        assert_eq!(
+            fs::read_to_string(project.root.join("scenes").join("main.story"))
+                .expect("read restored story"),
+            "scene before\n"
+        );
+        for stage in stages {
+            assert!(!stage.temporary.exists());
+            assert!(!stage.backup.exists());
+        }
+        assert!(!project.root.join(SAVE_JOURNAL_PATH).exists());
+    }
+
+    #[test]
+    fn recovery_finishes_a_partially_installed_committed_save() {
+        let project = TestProject::create("forward");
+        let (files, stages) = prepare_interrupted_transaction(&project, 4_102);
+        write_commit_marker(&project.root, 4_102).expect("write commit marker");
+        rename_with_retry(&stages[0].temporary, &stages[0].target).expect("partially install save");
+
+        let notice = recover_interrupted_save(&project.root)
+            .expect("recover committed save")
+            .expect("report recovery");
+
+        assert!(notice.contains("completing it"));
+        for file in files {
+            assert_eq!(
+                fs::read_to_string(resolved_child(&project.root, &file.path, "test path").unwrap())
+                    .expect("read completed source"),
+                file.content
+            );
+        }
+        for stage in stages {
+            assert!(!stage.temporary.exists());
+            assert!(!stage.backup.exists());
+        }
+        assert!(!project.root.join(SAVE_JOURNAL_PATH).exists());
+        assert!(!project.root.join(SAVE_COMMIT_PATH).exists());
+    }
 }

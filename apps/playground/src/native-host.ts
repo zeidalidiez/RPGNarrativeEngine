@@ -5,11 +5,18 @@ export interface NativeProject {
   readonly sessionId: string;
   readonly rootName: string;
   readonly files: readonly ProjectFileInput[];
+  readonly recoveryNotice: string | null;
 }
 
 export interface NativeSaveResult {
   readonly savedFiles: number;
   readonly changedPaths: readonly string[];
+  readonly recoveryNotice: string | null;
+}
+
+export interface NativeChangeCheckResult {
+  readonly changedPaths: readonly string[];
+  readonly recoveryNotice: string | null;
 }
 
 export interface NativeBuildResult {
@@ -18,8 +25,10 @@ export interface NativeBuildResult {
 
 export interface NativeHost {
   readonly openProject: () => Promise<NativeProject | null>;
+  readonly closeProject: (sessionId: string) => Promise<void>;
   readonly reloadProject: (sessionId: string) => Promise<NativeProject>;
-  readonly checkProjectChanges: (sessionId: string) => Promise<readonly string[]>;
+  readonly checkProjectChanges: (sessionId: string) => Promise<NativeChangeCheckResult>;
+  readonly onProjectFilesChanged: (sessionId: string, callback: () => void) => Promise<() => void>;
   readonly saveProject: (
     sessionId: string,
     files: readonly ProjectFileInput[],
@@ -39,6 +48,10 @@ interface NativeBuildFile {
   readonly contentBase64: string;
 }
 
+interface NativeProjectFilesChanged {
+  readonly sessionId: string;
+}
+
 function base64Content(content: string | Uint8Array): string {
   const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : content;
   const chunks: string[] = [];
@@ -54,22 +67,23 @@ function base64Content(content: string | Uint8Array): string {
 export async function createNativeHost(): Promise<NativeHost | null> {
   if (!('__TAURI_INTERNALS__' in window)) return null;
 
-  const [{ invoke }, { getCurrentWindow }] = await Promise.all([
+  const [{ invoke }, { listen }, { getCurrentWindow }] = await Promise.all([
     import('@tauri-apps/api/core'),
+    import('@tauri-apps/api/event'),
     import('@tauri-apps/api/window'),
   ]);
 
   return {
     openProject: () => invoke<NativeProject | null>('open_project'),
+    closeProject: (sessionId) => invoke<void>('close_project', { request: { sessionId } }),
     reloadProject: (sessionId) =>
       invoke<NativeProject>('reload_project', { request: { sessionId } }),
-    checkProjectChanges: async (sessionId) => {
-      const result = await invoke<{ readonly changedPaths: readonly string[] }>(
-        'check_project_changes',
-        { request: { sessionId } },
-      );
-      return result.changedPaths;
-    },
+    checkProjectChanges: (sessionId) =>
+      invoke<NativeChangeCheckResult>('check_project_changes', { request: { sessionId } }),
+    onProjectFilesChanged: (sessionId, callback) =>
+      listen<NativeProjectFilesChanged>('rpgne-project-files-changed', (event) => {
+        if (event.payload.sessionId === sessionId) callback();
+      }),
     saveProject: (sessionId, files) =>
       invoke<NativeSaveResult>('save_project', {
         request: { sessionId, files },

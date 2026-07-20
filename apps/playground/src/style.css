@@ -141,6 +141,10 @@ button {
   color: #efbd75;
 }
 
+.native-project-status[data-state='recovered'] {
+  color: #84d8b0;
+}
+
 .native-project-status[data-state='conflict'],
 .native-project-status[data-state='error'] {
   color: #ff9386;
