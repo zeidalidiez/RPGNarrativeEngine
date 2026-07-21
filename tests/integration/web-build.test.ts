@@ -44,6 +44,7 @@ describe('web project build', () => {
     const playerJavaScript = folder.files.find(
       ({ path }) => path === 'web/folder/assets/player.js',
     );
+    const playerStyles = folder.files.find(({ path }) => path === 'web/folder/assets/player.css');
     expect(folderHtml?.content).toContain(`data-game-bundle-hash="${first.gameBundleHash}"`);
     expect(folderHtml?.content).toContain('data-project-id="org.example.first-story"');
     expect(folderHtml?.content).toContain('data-saves="true"');
@@ -54,6 +55,11 @@ describe('web project build', () => {
     expect(playerJavaScript?.content).toContain('Load autosave');
     expect(playerJavaScript?.content).toContain('Import save');
     expect(playerJavaScript?.content).toContain('History');
+    expect(playerJavaScript?.content).toContain('speakerTone');
+    expect(playerJavaScript?.content).toContain('speakerSide');
+    expect(playerStyles?.content).toContain('.nre-dialogue[data-speaker-tone="5"]');
+    expect(playerStyles?.content).toContain('.nre-dialogue[data-variant="radio"]');
+    expect(playerStyles?.content).toContain('counter(rpgne-choice, decimal-leading-zero)');
 
     const zip = first.artifacts.find((artifact) => artifact.target === 'web-zip');
     const secondZip = second.artifacts.find((artifact) => artifact.target === 'web-zip');

@@ -100,6 +100,16 @@ const DEFAULT_MANUAL_SAVE_SLOTS = 3;
 const MAX_MANUAL_SAVE_SLOTS = 10;
 const MAX_IMPORTED_SAVE_BYTES = 8 * 1024 * 1024;
 const MAX_RENDERED_TRANSCRIPT_ENTRIES = 250;
+const SPEAKER_VISUAL_TONES = 6;
+
+/** Stable presentation variety for unconfigured voices; never used as narrative identity. */
+function speakerVisualTone(reference: string): number {
+  let hash = 5381;
+  for (const character of reference) {
+    hash = (Math.imul(hash, 33) ^ (character.codePointAt(0) ?? 0)) >>> 0;
+  }
+  return hash % SPEAKER_VISUAL_TONES;
+}
 
 function manualSlotCount(options: NarrativePlayerSaveOptions | undefined): number {
   const requested = options?.manualSlots ?? DEFAULT_MANUAL_SAVE_SLOTS;
@@ -462,10 +472,16 @@ export function mountNarrativePlayer(
     const beat = document.createElement('article');
     beat.className = view.speaker === null ? 'nre-beat nre-narration' : 'nre-beat nre-dialogue';
     if (view.speaker !== null) {
+      const tone = speakerVisualTone(view.speaker.reference);
+      beat.dataset['speakerTone'] = String(tone);
+      beat.dataset['speakerSide'] = tone % 2 === 0 ? 'left' : 'right';
       const speaker = document.createElement('p');
       speaker.className = 'nre-speaker';
       speaker.textContent = view.speaker.reference;
-      if (view.speaker.variant !== null) speaker.dataset['variant'] = view.speaker.variant;
+      if (view.speaker.variant !== null) {
+        beat.dataset['variant'] = view.speaker.variant;
+        speaker.dataset['variant'] = view.speaker.variant;
+      }
       beat.append(speaker);
     }
     const prose = document.createElement('div');
