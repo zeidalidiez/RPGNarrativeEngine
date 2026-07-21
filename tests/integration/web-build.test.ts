@@ -88,6 +88,66 @@ describe('web project build', () => {
     ).toBe(true);
   });
 
+  it('creates repository-subpath-safe PWA files with an explicit version update path', async () => {
+    const files = (await starterProject()).map((file) =>
+      file.path === 'project.toml'
+        ? {
+            ...file,
+            content: file.content.replace(
+              'base_path = "./"',
+              'base_path = "/RPGNarrativeEngine/"\npwa = true',
+            ),
+          }
+        : file,
+    );
+    const result = await buildWebProject({ files, targets: ['web', 'web-zip'] });
+
+    expect(result.web).toEqual({ basePath: '/RPGNarrativeEngine/', pwa: true });
+    const folder = result.artifacts.find((artifact) => artifact.target === 'web');
+    if (folder?.kind !== 'folder') throw new Error('Expected a PWA web folder artifact.');
+    expect(folder.files.map(({ path }) => path)).toEqual([
+      'web/folder/index.html',
+      'web/folder/game-bundle.json',
+      'web/folder/assets/player.css',
+      'web/folder/assets/player.js',
+      'web/folder/manifest.webmanifest',
+      'web/folder/service-worker.js',
+      'web/folder/assets/pwa.js',
+    ]);
+
+    const html = folder.files.find(({ path }) => path.endsWith('/index.html'))?.content;
+    const manifest = folder.files.find(({ path }) =>
+      path.endsWith('/manifest.webmanifest'),
+    )?.content;
+    const worker = folder.files.find(({ path }) => path.endsWith('/service-worker.js'))?.content;
+    const registration = folder.files.find(({ path }) => path.endsWith('/assets/pwa.js'))?.content;
+    expect(html).toContain('href="/RPGNarrativeEngine/manifest.webmanifest"');
+    expect(html).toContain('data-service-worker="/RPGNarrativeEngine/service-worker.js"');
+    expect(manifest).toContain('"start_url": "./"');
+    expect(manifest).toContain('"scope": "./"');
+    expect(worker).toContain(result.gameBundleHash);
+    expect(worker).toContain('RPGNE_ACTIVATE_UPDATE');
+    expect(registration).toContain('Reload to update');
+
+    const versionChanged = files.map((file) =>
+      file.path === 'project.toml'
+        ? { ...file, content: file.content.replace('version = "0.1.0"', 'version = "0.1.1"') }
+        : file,
+    );
+    const changedResult = await buildWebProject({ files: versionChanged, targets: ['web'] });
+    const changedFolder = changedResult.artifacts.find((artifact) => artifact.target === 'web');
+    if (changedFolder?.kind !== 'folder') throw new Error('Expected the changed PWA folder.');
+    const changedWorker = changedFolder.files.find(({ path }) =>
+      path.endsWith('/service-worker.js'),
+    )?.content;
+    expect(changedResult.gameBundleHash).toBe(result.gameBundleHash);
+    expect(changedWorker).not.toBe(worker);
+
+    await expect(buildWebProject({ files, targets: ['web-single'], pwa: true })).rejects.toThrow(
+      /requires the web or web-zip target/u,
+    );
+  });
+
   it('promotes filesystem output atomically and preserves the last build after compilation fails', async () => {
     const temporaryParent = fileURLToPath(new URL('../../build/', import.meta.url));
     await mkdir(temporaryParent, { recursive: true });

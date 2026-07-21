@@ -94,8 +94,10 @@ const fileInput = required<HTMLInputElement>('#file-input');
 const projectInput = required<HTMLInputElement>('#project-input');
 const buildDialog = required<HTMLDialogElement>('#build-dialog');
 const buildTargets = required<HTMLFieldSetElement>('#build-targets');
+const buildWebOptions = required<HTMLFieldSetElement>('#build-web-options');
 const targetWebZip = required<HTMLInputElement>('#target-web-zip');
 const targetWebSingle = required<HTMLInputElement>('#target-web-single');
+const webPwa = required<HTMLInputElement>('#web-pwa');
 const startBuildButton = required<HTMLButtonElement>('#start-build-button');
 const buildProgress = required<HTMLElement>('#build-progress');
 const buildResults = required<HTMLElement>('#build-results');
@@ -1018,10 +1020,14 @@ function openBuildDialog(): void {
     const targets = configuredWebBuildTargets(project.manifest);
     targetWebZip.checked = targets.includes('web') || targets.includes('web-zip');
     targetWebSingle.checked = targets.includes('web-single');
+    webPwa.checked = project.manifest.build.web.pwa;
+    webPwa.disabled = !targetWebZip.checked;
     buildProgress.textContent = `${project.manifest.project.title} \u00b7 ${project.manifest.build.profile} profile`;
   } catch (error) {
     targetWebZip.checked = false;
     targetWebSingle.checked = false;
+    webPwa.checked = false;
+    webPwa.disabled = true;
     buildFailure(error);
   }
   buildDialog.showModal();
@@ -1031,7 +1037,10 @@ async function startBuild(): Promise<void> {
   if (session.kind !== 'project') return;
   const buildSession = session;
   const targets: WebBuildTarget[] = [];
-  if (targetWebZip.checked) targets.push('web-zip');
+  if (targetWebZip.checked) {
+    if (nativeHost !== null && buildSession.nativeSessionId !== null) targets.push('web');
+    targets.push('web-zip');
+  }
   if (targetWebSingle.checked) targets.push('web-single');
   if (targets.length === 0) {
     buildProgress.className = 'build-progress build-error';
@@ -1041,12 +1050,14 @@ async function startBuild(): Promise<void> {
 
   startBuildButton.disabled = true;
   buildTargets.disabled = true;
+  buildWebOptions.disabled = true;
   buildResults.hidden = true;
   buildProgress.className = 'build-progress';
   try {
     const result = await buildWebProject({
       files: buildSession.files,
       targets,
+      pwa: webPwa.checked,
       onProgress(event) {
         buildProgress.textContent = event.message;
       },
@@ -1075,6 +1086,7 @@ async function startBuild(): Promise<void> {
   } finally {
     startBuildButton.disabled = false;
     buildTargets.disabled = false;
+    buildWebOptions.disabled = false;
   }
 }
 
@@ -1359,6 +1371,9 @@ sourceFile.addEventListener('change', () => {
 runButton.addEventListener('click', runStory);
 downloadButton.addEventListener('click', downloadSource);
 buildButton.addEventListener('click', openBuildDialog);
+targetWebZip.addEventListener('change', () => {
+  webPwa.disabled = !targetWebZip.checked;
+});
 startBuildButton.addEventListener('click', () => void startBuild());
 saveButton.addEventListener('click', () => void saveNativeProject());
 reloadButton.addEventListener('click', () => void reloadNativeProject());

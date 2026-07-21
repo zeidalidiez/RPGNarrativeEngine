@@ -1666,6 +1666,10 @@ kbd {
   border: 0;
 }
 
+.build-options {
+  margin-top: 1rem;
+}
+
 .build-targets legend {
   margin-bottom: 0.6rem;
   color: #777c88;
@@ -1689,6 +1693,11 @@ kbd {
 .build-target:has(input:checked) {
   border-color: #557d71;
   background: #1b2927;
+}
+
+.build-target:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .build-target input {

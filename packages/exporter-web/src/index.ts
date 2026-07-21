@@ -26,6 +26,8 @@ export interface WebExportRequest {
   readonly game: CompiledGame;
   readonly metadata: WebExportMetadata;
   readonly basePath?: string;
+  /** Add an offline application manifest, versioned service worker, and update prompt. */
+  readonly pwa?: boolean;
 }
 
 export interface WebExportFile {
@@ -113,6 +115,11 @@ function inlineStyle(value: string): string {
   return value.replace(/<\/style/giu, '<\\/style');
 }
 
+function shortApplicationName(title: string): string {
+  const points = [...title];
+  return points.length <= 30 ? title : `${points.slice(0, 29).join('')}…`;
+}
+
 function normalizedBasePath(value: string | undefined): string {
   const basePath = value ?? './';
   if (
@@ -162,26 +169,178 @@ function pageBody(
     </main>`;
 }
 
+function webManifest(request: WebExportRequest): string {
+  return `${JSON.stringify(
+    {
+      name: request.metadata.title,
+      short_name: shortApplicationName(request.metadata.title),
+      id: './',
+      start_url: './',
+      scope: './',
+      display: 'standalone',
+      background_color: '#111318',
+      theme_color: '#111318',
+      lang: request.metadata.language,
+      categories: ['games', 'entertainment'],
+      description: `${request.metadata.title}, created with RPG Narrative Engine.`,
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function serviceWorker(
+  request: WebExportRequest,
+  gameBundleHash: string,
+  cacheIdentity: string,
+): string {
+  const cachePrefix = `rpgne:${request.metadata.projectId}:`;
+  const cacheName = `${cachePrefix}${cacheIdentity}`;
+  const offlinePaths = [
+    './',
+    './index.html',
+    './game-bundle.json',
+    './manifest.webmanifest',
+    './assets/player.css',
+    './assets/player.js',
+    './assets/pwa.js',
+  ];
+  return `const GAME_BUNDLE_HASH = ${JSON.stringify(gameBundleHash)};
+const CACHE_PREFIX = ${JSON.stringify(cachePrefix)};
+const CACHE_NAME = ${JSON.stringify(cacheName)};
+const OFFLINE_PATHS = ${JSON.stringify(offlinePaths)};
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.addAll(OFFLINE_PATHS.map((path) => new URL(path, self.registration.scope).href)),
+    ),
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((names) => Promise.all(
+        names
+          .filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME)
+          .map((name) => caches.delete(name)),
+      ))
+      .then(() => self.clients.claim()),
+  );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'RPGNE_ACTIVATE_UPDATE') void self.skipWaiting();
+});
+
+self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+  const requestUrl = new URL(event.request.url);
+  if (
+    requestUrl.origin !== self.location.origin ||
+    !requestUrl.href.startsWith(self.registration.scope)
+  ) return;
+
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    if (event.request.mode === 'navigate') {
+      try {
+        const response = await fetch(event.request);
+        if (response.ok) {
+          await cache.put(new URL('./index.html', self.registration.scope).href, response.clone());
+        }
+        return response;
+      } catch {
+        return (await cache.match(new URL('./index.html', self.registration.scope).href)) ?? Response.error();
+      }
+    }
+
+    const cached = await cache.match(event.request);
+    if (cached !== undefined) return cached;
+    const response = await fetch(event.request);
+    if (response.ok) await cache.put(event.request, response.clone());
+    return response;
+  })());
+});
+`;
+}
+
+function pwaRegistration(): string {
+  return `const root = document.querySelector('#player');
+const serviceWorkerUrl = root?.dataset.serviceWorker;
+
+if ('serviceWorker' in navigator && serviceWorkerUrl) {
+  let reloadForUpdate = false;
+  let updateNotice;
+
+  const showUpdate = (worker) => {
+    if (updateNotice) return;
+    updateNotice = document.createElement('aside');
+    updateNotice.className = 'rpgne-update';
+    updateNotice.setAttribute('role', 'status');
+    const message = document.createElement('span');
+    message.textContent = 'A new version is ready.';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Reload to update';
+    button.addEventListener('click', () => {
+      reloadForUpdate = true;
+      button.disabled = true;
+      worker.postMessage({ type: 'RPGNE_ACTIVATE_UPDATE' });
+    });
+    updateNotice.append(message, button);
+    document.body.append(updateNotice);
+  };
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloadForUpdate) location.reload();
+  });
+
+  navigator.serviceWorker.register(serviceWorkerUrl).then((registration) => {
+    if (registration.waiting) showUpdate(registration.waiting);
+    registration.addEventListener('updatefound', () => {
+      const worker = registration.installing;
+      worker?.addEventListener('statechange', () => {
+        if (worker.state === 'installed' && navigator.serviceWorker.controller) showUpdate(worker);
+      });
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') void registration.update();
+    });
+  }).catch((error) => console.warn('Offline support could not start.', error));
+}
+`;
+}
+
 function folderHtml(request: WebExportRequest, gameBundleHash: string): string {
   const basePath = normalizedBasePath(request.basePath);
   const title = escapeHtml(request.metadata.title);
   const bundleUrl = `${basePath}game-bundle.json`;
+  const serviceWorkerUrl = `${basePath}service-worker.js`;
+  const pwaHead = request.pwa
+    ? `\n    <link rel="manifest" href="${escapeHtml(`${basePath}manifest.webmanifest`)}" />`
+    : '';
+  const pwaAttributes = request.pwa ? ` data-service-worker="${escapeHtml(serviceWorkerUrl)}"` : '';
+  const pwaScript = request.pwa
+    ? `\n    <script src="${escapeHtml(`${basePath}assets/pwa.js`)}"></script>`
+    : '';
   return `<!doctype html>
 <html lang="${escapeHtml(request.metadata.language)}">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="referrer" content="no-referrer" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self' data:; media-src 'self' data: blob:; base-uri 'none'; form-action 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self' data:; media-src 'self' data: blob:; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'" />
     <meta name="application-name" content="${title}" />
     <meta name="generator" content="RPG Narrative Engine" />
-    <link rel="icon" href="data:," />
+    <link rel="icon" href="data:," />${pwaHead}
     <title>${title}</title>
     <link rel="stylesheet" href="${escapeHtml(`${basePath}assets/player.css`)}" />
   </head>
   <body>
-    ${pageBody(request.metadata, gameBundleHash, ` data-game-bundle="${escapeHtml(bundleUrl)}"`)}
-    <script src="${escapeHtml(`${basePath}assets/player.js`)}"></script>
+    ${pageBody(request.metadata, gameBundleHash, ` data-game-bundle="${escapeHtml(bundleUrl)}"${pwaAttributes}`)}
+    <script src="${escapeHtml(`${basePath}assets/player.js`)}"></script>${pwaScript}
   </body>
 </html>
 `;
@@ -222,16 +381,41 @@ async function singleHtml(
 export async function createWebFolderExport(request: WebExportRequest): Promise<WebFolderExport> {
   const gameJson = `${canonicalJson(request.game)}\n`;
   const contentHash = await sha256Hex(gameJson);
-  const files = await Promise.all([
-    exportedFile('index.html', 'text/html;charset=utf-8', folderHtml(request, contentHash)),
+  const indexContent = folderHtml(request, contentHash);
+  const playerStyles = `${webPlayerStyles.trim()}\n`;
+  const playerJavaScript = `${webPlayerJavaScript.trim()}\n`;
+  const pendingFiles = [
+    exportedFile('index.html', 'text/html;charset=utf-8', indexContent),
     exportedFile('game-bundle.json', 'application/json;charset=utf-8', gameJson),
-    exportedFile('assets/player.css', 'text/css;charset=utf-8', `${webPlayerStyles.trim()}\n`),
-    exportedFile(
-      'assets/player.js',
-      'text/javascript;charset=utf-8',
-      `${webPlayerJavaScript.trim()}\n`,
-    ),
-  ]);
+    exportedFile('assets/player.css', 'text/css;charset=utf-8', playerStyles),
+    exportedFile('assets/player.js', 'text/javascript;charset=utf-8', playerJavaScript),
+  ];
+  if (request.pwa === true) {
+    const manifest = webManifest(request);
+    const registration = pwaRegistration();
+    const workerTemplate = serviceWorker(request, contentHash, 'pending-cache-identity');
+    const cacheIdentity = await sha256Hex(
+      canonicalJson({
+        gameJson,
+        indexContent,
+        manifest,
+        playerJavaScript,
+        playerStyles,
+        registration,
+        workerTemplate,
+      }),
+    );
+    pendingFiles.push(
+      exportedFile('manifest.webmanifest', 'application/manifest+json;charset=utf-8', manifest),
+      exportedFile(
+        'service-worker.js',
+        'text/javascript;charset=utf-8',
+        serviceWorker(request, contentHash, cacheIdentity),
+      ),
+      exportedFile('assets/pwa.js', 'text/javascript;charset=utf-8', registration),
+    );
+  }
+  const files = await Promise.all(pendingFiles);
   return Object.freeze({
     target: 'web',
     contentHash,

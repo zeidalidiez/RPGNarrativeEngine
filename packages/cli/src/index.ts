@@ -32,6 +32,7 @@ export interface FilesystemBuildOptions {
   readonly output?: string;
   readonly targets?: readonly BuildTarget[];
   readonly profile?: BuildProfile;
+  readonly pwa?: boolean;
   readonly clean?: boolean;
   readonly onProgress?: (event: BuildProgressEvent) => void;
 }
@@ -349,6 +350,7 @@ export async function buildProjectDirectory(
     files,
     ...(options.targets === undefined ? {} : { targets: options.targets }),
     ...(options.profile === undefined ? {} : { profile: options.profile }),
+    ...(options.pwa === undefined ? {} : { pwa: options.pwa }),
     ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
   });
 
@@ -403,6 +405,7 @@ interface BuildCommandOptions {
   readonly output?: string;
   readonly targets?: readonly BuildTarget[];
   readonly profile?: BuildProfile;
+  readonly pwa?: boolean;
   readonly clean: boolean;
   readonly report: 'both' | 'json' | 'text';
 }
@@ -423,6 +426,7 @@ function parseBuildArguments(arguments_: readonly string[]): BuildCommandOptions
   let profile: BuildProfile | undefined;
   let report: BuildCommandOptions['report'] = 'text';
   let clean = false;
+  let pwa: boolean | undefined;
   let sawProject = false;
   let useAllTargets = false;
   const targets: BuildTarget[] = [];
@@ -432,6 +436,14 @@ function parseBuildArguments(arguments_: readonly string[]): BuildCommandOptions
     if (argument === undefined) continue;
     if (argument === '--clean') {
       clean = true;
+      continue;
+    }
+    if (argument === '--pwa' || argument === '--no-pwa') {
+      const nextPwa = argument === '--pwa';
+      if (pwa !== undefined && pwa !== nextPwa) {
+        throw new FilesystemBuildError('--pwa and --no-pwa cannot be combined.');
+      }
+      pwa = nextPwa;
       continue;
     }
     if (argument === '--target') {
@@ -486,6 +498,7 @@ function parseBuildArguments(arguments_: readonly string[]): BuildCommandOptions
     report,
     ...(output === undefined ? {} : { output }),
     ...(profile === undefined ? {} : { profile }),
+    ...(pwa === undefined ? {} : { pwa }),
     ...(useAllTargets || targets.length === 0 ? {} : { targets: Object.freeze(targets) }),
   };
 }
@@ -499,6 +512,7 @@ Usage:
 Build options:
   --target bundle|web|web-zip|web-single|all   Repeat to select outputs
   --profile development|release               One-run profile override
+  --pwa | --no-pwa                            One-run offline PWA override
   --output <project-relative-path>             One-run output directory override
   --clean                                      Replace only the owned output directory
   --report text|json|both                      Console report format
@@ -528,6 +542,7 @@ function reportSummary(result: FilesystemBuildResult): Record<string, unknown> {
     profile: result.build.profile,
     outputDirectory: result.outputDirectory,
     gameBundleHash: result.build.gameBundleHash,
+    web: result.build.web,
     targets: result.build.targets,
     unavailableTargets: result.unavailableTargets,
     artifacts: result.build.artifacts.map((artifact) => ({
@@ -573,6 +588,7 @@ export async function runCli(
     ...(options.output === undefined ? {} : { output: options.output }),
     ...(options.targets === undefined ? {} : { targets: options.targets }),
     ...(options.profile === undefined ? {} : { profile: options.profile }),
+    ...(options.pwa === undefined ? {} : { pwa: options.pwa }),
     ...(showText
       ? {
           onProgress(event: BuildProgressEvent) {

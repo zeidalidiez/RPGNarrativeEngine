@@ -39,6 +39,8 @@ export interface BuildProjectRequest {
   readonly targets?: readonly BuildTarget[];
   /** Explicit one-run profile. Omit to use project.toml without rewriting it. */
   readonly profile?: BuildProfile;
+  /** Explicit one-run PWA choice. Omit to use build.web.pwa without rewriting it. */
+  readonly pwa?: boolean;
   readonly signal?: BuildCancellationSignal;
   readonly onProgress?: (event: BuildProgressEvent) => void;
 }
@@ -74,6 +76,10 @@ export interface BuildProjectResult {
   readonly profile: BuildProfile;
   readonly targets: readonly BuildTarget[];
   readonly gameBundleHash: string;
+  readonly web: {
+    readonly basePath: string;
+    readonly pwa: boolean;
+  };
   readonly artifacts: readonly BuildArtifact[];
   /** Complete canonical build-directory contents for filesystem hosts. */
   readonly outputFiles: readonly BuildOutputFile[];
@@ -209,6 +215,11 @@ export async function buildWebProject(request: BuildProjectRequest): Promise<Bui
   const loaded = loadNarrativeProject(request.files);
   const targets = selectedTargets(request, loaded.manifest);
   const profile = request.profile ?? loaded.manifest.build.profile;
+  const createsWebFolder = targets.includes('web') || targets.includes('web-zip');
+  if (request.pwa === true && !createsWebFolder) {
+    throw new BuildConfigurationError('PWA output requires the web or web-zip target.');
+  }
+  const pwa = createsWebFolder && (request.pwa ?? loaded.manifest.build.web.pwa);
 
   checkCancellation(request);
   emit(request, { phase: 'compile', progress: 0.2, message: 'Compiling story sources' });
@@ -228,12 +239,13 @@ export async function buildWebProject(request: BuildProjectRequest): Promise<Bui
     game,
     metadata,
     basePath: loaded.manifest.build.web.basePath,
+    pwa,
   });
 
   checkCancellation(request);
   emit(request, { phase: 'export', progress: 0.45, message: 'Creating web player files' });
   let folder: WebFolderExport | null = null;
-  if (targets.includes('web') || targets.includes('web-zip')) {
+  if (createsWebFolder) {
     folder = await createWebFolderExport(exportRequest);
   }
   const bundleContent = `${canonicalJson(game)}\n`;
@@ -331,6 +343,7 @@ export async function buildWebProject(request: BuildProjectRequest): Promise<Bui
       project: { id: metadata.projectId, title: metadata.title, version: metadata.version },
       engineVersion: ENGINE_VERSION,
       profile,
+      web: { basePath: loaded.manifest.build.web.basePath, pwa },
       gameBundleHash,
       artifacts: artifacts.map((artifact) =>
         manifestEntry(artifact, loaded.manifest, gameBundleHash, profile),
@@ -353,6 +366,7 @@ export async function buildWebProject(request: BuildProjectRequest): Promise<Bui
       projectVersion: metadata.version,
       profile,
       targets,
+      web: { basePath: loaded.manifest.build.web.basePath, pwa },
       storyFiles: loaded.storyFiles.map(({ path }) => path),
       sceneCount: Object.keys(game.scenes).length,
       gameBundleHash,
@@ -379,6 +393,7 @@ export async function buildWebProject(request: BuildProjectRequest): Promise<Bui
     profile,
     targets,
     gameBundleHash,
+    web: Object.freeze({ basePath: loaded.manifest.build.web.basePath, pwa }),
     artifacts: Object.freeze(artifacts),
     outputFiles: Object.freeze(outputFiles),
   });

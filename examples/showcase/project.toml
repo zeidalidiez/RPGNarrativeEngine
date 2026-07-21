@@ -27,3 +27,4 @@ targets = ["web"]
 
 [build.web]
 base_path = "./"
+pwa = true

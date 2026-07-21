@@ -230,6 +230,20 @@
             </label>
           </fieldset>
 
+          <fieldset id="build-web-options" class="build-targets build-options">
+            <legend>Web options</legend>
+            <label class="build-target" for="web-pwa">
+              <input id="web-pwa" type="checkbox" />
+              <span>
+                <strong>Offline PWA</strong>
+                <small
+                  >Add install metadata, offline caching, and an explicit update prompt to the
+                  static web package.</small
+                >
+              </span>
+            </label>
+          </fieldset>
+
           <div class="build-action-row">
             <button id="start-build-button" class="button button-primary" type="button">
               Build selected outputs
