@@ -1,8 +1,14 @@
 import { compileStory, StoryCompileError } from '@rpgnarrativeengine/compiler';
+import { webPlayerStyles } from '@rpgnarrativeengine/exporter-web/styles';
 import { mountNarrativePlayer, type NarrativePlayerSaveOptions } from '@rpgnarrativeengine/player';
 
 import storySource from '../story/lighthouse.story?raw';
 import './style.css';
+
+const playerStyle = document.createElement('style');
+playerStyle.dataset['rpgnePlayerStyles'] = '';
+playerStyle.textContent = webPlayerStyles;
+document.head.prepend(playerStyle);
 
 const player = document.querySelector<HTMLElement>('#player');
 const atmosphere = document.querySelector<HTMLElement>('#atmosphere');

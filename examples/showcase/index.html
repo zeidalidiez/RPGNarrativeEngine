@@ -11,30 +11,29 @@
     <title>The Light at Brinewatch · RPG Narrative Engine</title>
   </head>
   <body>
-    <main class="showcase-shell">
-      <header class="showcase-header">
+    <main class="rpgne-shell showcase-shell">
+      <header class="rpgne-header showcase-header">
         <a
-          class="engine-mark"
+          class="rpgne-brand engine-mark"
           href="https://github.com/zeidalidiez/RPGNarrativeEngine"
           aria-label="RPG Narrative Engine repository"
         >
           <span class="engine-glyph" aria-hidden="true">RNE</span>
           <span>RPG Narrative Engine</span>
         </a>
-        <p id="atmosphere" class="atmosphere" aria-live="polite">The storm is approaching</p>
+        <h1 id="story-title" class="rpgne-title">The Light at Brinewatch</h1>
+        <p id="atmosphere" class="rpgne-version atmosphere" aria-live="polite">
+          The storm is approaching
+        </p>
       </header>
 
-      <section class="story-intro" aria-labelledby="story-title">
-        <p class="kicker">A playable engine demo</p>
-        <h1 id="story-title">The Light at Brinewatch</h1>
-        <p class="dek">
-          A keeper, a darkened beacon, and one hour before the mail ship reaches the rocks.
-        </p>
-      </section>
+      <p class="showcase-dek">
+        A keeper, a darkened beacon, and one hour before the mail ship reaches the rocks.
+      </p>
 
-      <div id="player" class="player-frame"></div>
+      <div id="player" class="rpgne-player-frame player-frame"></div>
 
-      <footer class="showcase-footer">
+      <footer class="rpgne-footer showcase-footer">
         <p>
           Written in <code>.story</code>, compiled in the browser, and played by the same runtime
           intended for exported games.

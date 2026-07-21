@@ -100,15 +100,26 @@ const DEFAULT_MANUAL_SAVE_SLOTS = 3;
 const MAX_MANUAL_SAVE_SLOTS = 10;
 const MAX_IMPORTED_SAVE_BYTES = 8 * 1024 * 1024;
 const MAX_RENDERED_TRANSCRIPT_ENTRIES = 250;
+const MAX_RETAINED_STAGE_BEATS = 3;
 const SPEAKER_VISUAL_TONES = 6;
+const SCENE_VISUAL_TONES = 6;
 
-/** Stable presentation variety for unconfigured voices; never used as narrative identity. */
-function speakerVisualTone(reference: string): number {
+function stableVisualTone(reference: string, toneCount: number): number {
   let hash = 5381;
   for (const character of reference) {
     hash = (Math.imul(hash, 33) ^ (character.codePointAt(0) ?? 0)) >>> 0;
   }
-  return hash % SPEAKER_VISUAL_TONES;
+  return hash % toneCount;
+}
+
+/** Stable presentation variety for unconfigured voices; never used as narrative identity. */
+function speakerVisualTone(reference: string): number {
+  return stableVisualTone(reference, SPEAKER_VISUAL_TONES);
+}
+
+/** Stable ambient palette variety; never used as scene identity or game state. */
+function sceneVisualTone(reference: string): number {
+  return stableVisualTone(reference, SCENE_VISUAL_TONES);
 }
 
 function manualSlotCount(options: NarrativePlayerSaveOptions | undefined): number {
@@ -468,9 +479,27 @@ export function mountNarrativePlayer(
     }
   }
 
-  function renderText(view: Extract<RuntimeView, { readonly kind: 'text' }>): void {
+  function recentTextEntries(
+    limit: number,
+  ): readonly Extract<RuntimeTranscriptEntry, { readonly kind: 'text' }>[] {
+    return runtime.transcript
+      .filter(
+        (entry): entry is Extract<RuntimeTranscriptEntry, { readonly kind: 'text' }> =>
+          entry.kind === 'text',
+      )
+      .slice(-limit);
+  }
+
+  function createTextBeat(
+    view: Extract<RuntimeView, { readonly kind: 'text' }>,
+    state: 'current' | 'receded',
+    depth: number,
+  ): HTMLElement {
     const beat = document.createElement('article');
     beat.className = view.speaker === null ? 'nre-beat nre-narration' : 'nre-beat nre-dialogue';
+    beat.dataset['stageState'] = state;
+    beat.dataset['stageDepth'] = String(depth);
+    if (state === 'receded') beat.setAttribute('aria-hidden', 'true');
     if (view.speaker !== null) {
       const tone = speakerVisualTone(view.speaker.reference);
       beat.dataset['speakerTone'] = String(tone);
@@ -488,18 +517,60 @@ export function mountNarrativePlayer(
     prose.className = 'nre-prose';
     appendInline(document, prose, view.content);
     beat.append(prose);
+    return beat;
+  }
+
+  function createConversationStack(
+    entries: readonly Extract<RuntimeTranscriptEntry, { readonly kind: 'text' }>[],
+    current: boolean,
+    className = '',
+  ): HTMLElement {
+    const stack = document.createElement('div');
+    stack.className = `nre-conversation-stack${className === '' ? '' : ` ${className}`}`;
+    const previous = entries.at(-2);
+    const latest = entries.at(-1);
+    if (
+      current &&
+      previous !== undefined &&
+      latest !== undefined &&
+      previous.speaker !== null &&
+      latest.speaker !== null
+    ) {
+      stack.dataset['composition'] = 'duet';
+    }
+    for (const [index, entry] of entries.entries()) {
+      const isCurrent = current && index === entries.length - 1;
+      stack.append(
+        createTextBeat(entry, isCurrent ? 'current' : 'receded', entries.length - index - 1),
+      );
+    }
+    return stack;
+  }
+
+  function renderText(view: Extract<RuntimeView, { readonly kind: 'text' }>): void {
+    const recent = recentTextEntries(MAX_RETAINED_STAGE_BEATS);
+    const entries = [...recent.slice(0, -1), view];
+    const stack = createConversationStack(entries, true);
     const controls = document.createElement('div');
     controls.className = 'nre-controls';
     const continueButton = button(document, 'Continue', 'nre-button nre-continue');
     continueButton.addEventListener('click', () => run(() => runtime.continue()));
     controls.append(continueButton);
-    stage.append(beat, controls);
+    stage.append(stack, controls);
     continueButton.focus({ preventScroll: true });
   }
 
   function renderChoices(view: Extract<RuntimeView, { readonly kind: 'choice' }>): void {
+    const context = recentTextEntries(MAX_RETAINED_STAGE_BEATS);
+    if (context.length > 0) {
+      stage.append(createConversationStack(context, false, 'nre-choice-context'));
+    }
+    const decision = document.createElement('section');
+    decision.className = 'nre-decision';
+    decision.setAttribute('aria-labelledby', 'nre-choice-prompt');
     const heading = document.createElement('h2');
     heading.className = 'nre-prompt';
+    heading.id = 'nre-choice-prompt';
     heading.textContent = 'What do you do?';
     const list = document.createElement('div');
     list.className = 'nre-choices';
@@ -508,13 +579,20 @@ export function mountNarrativePlayer(
       choiceButton.addEventListener('click', () => run(() => runtime.choose(option.id)));
       list.append(choiceButton);
     }
-    stage.append(heading, list);
+    decision.append(heading, list);
+    stage.append(decision);
     list.querySelector('button')?.focus({ preventScroll: true });
   }
 
   function renderEnding(view: Extract<RuntimeView, { readonly kind: 'ending' }>): void {
+    const context = recentTextEntries(2);
+    if (context.length > 0) {
+      stage.append(createConversationStack(context, false, 'nre-ending-context'));
+    }
     const ending = document.createElement('div');
     ending.className = 'nre-ending';
+    ending.dataset['ending'] = view.id;
+    ending.dataset['endingTone'] = String(stableVisualTone(view.id, SCENE_VISUAL_TONES));
     const eyebrow = document.createElement('p');
     eyebrow.className = 'nre-ending-label';
     eyebrow.textContent = 'Ending reached';
@@ -531,6 +609,8 @@ export function mountNarrativePlayer(
     stage.replaceChildren();
     stage.dataset['scene'] = runtime.sceneId;
     const view = runtime.view;
+    stage.dataset['sceneTone'] = String(sceneVisualTone(runtime.sceneId));
+    stage.dataset['viewKind'] = view.kind;
     if (view.kind === 'text') renderText(view);
     else if (view.kind === 'choice') renderChoices(view);
     else renderEnding(view);

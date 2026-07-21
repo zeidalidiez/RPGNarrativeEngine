@@ -57,8 +57,14 @@ describe('web project build', () => {
     expect(playerJavaScript?.content).toContain('History');
     expect(playerJavaScript?.content).toContain('speakerTone');
     expect(playerJavaScript?.content).toContain('speakerSide');
+    expect(playerJavaScript?.content).toContain('stageState');
+    expect(playerJavaScript?.content).toContain('sceneTone');
+    expect(playerJavaScript?.content).toContain('nre-conversation-stack');
+    expect(playerJavaScript?.content).toContain('nre-choice-context');
     expect(playerStyles?.content).toContain('.nre-dialogue[data-speaker-tone="5"]');
     expect(playerStyles?.content).toContain('.nre-dialogue[data-variant="radio"]');
+    expect(playerStyles?.content).toContain('[data-stage-state="current"]');
+    expect(playerStyles?.content).toContain('.nre-choice-context');
     expect(playerStyles?.content).toContain('counter(rpgne-choice, decimal-leading-zero)');
 
     const zip = first.artifacts.find((artifact) => artifact.target === 'web-zip');

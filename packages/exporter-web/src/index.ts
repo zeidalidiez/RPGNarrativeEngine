@@ -161,9 +161,9 @@ function pageBody(
   return `<main class="rpgne-shell">
       <header class="rpgne-header">
         <p class="rpgne-brand">RPG Narrative Engine</p>
+        <h1 class="rpgne-title">${escapeHtml(metadata.title)}</h1>
         <p class="rpgne-version">Version ${escapeHtml(metadata.version)}</p>
       </header>
-      <h1 class="rpgne-title">${escapeHtml(metadata.title)}</h1>
       <div id="player" class="rpgne-player-frame" data-project-id="${escapeHtml(metadata.projectId)}" data-game-bundle-hash="${gameBundleHash}" data-saves="${String(metadata.saves)}"${playerAttributes}></div>
       <footer class="rpgne-footer">Created with RPG Narrative Engine</footer>
     </main>`;

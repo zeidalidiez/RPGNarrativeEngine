@@ -95,6 +95,9 @@ importers:
       '@rpgnarrativeengine/compiler':
         specifier: workspace:*
         version: link:../../packages/compiler
+      '@rpgnarrativeengine/exporter-web':
+        specifier: workspace:*
+        version: link:../../packages/exporter-web
       '@rpgnarrativeengine/player':
         specifier: workspace:*
         version: link:../../packages/player
